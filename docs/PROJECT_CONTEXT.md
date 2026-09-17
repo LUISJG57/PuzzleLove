@@ -155,9 +155,21 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
 | Traefik, monitoreo y sistema | 1.3 GB |
 
 ### Trabajo del agente, en orden
-1. **Tracking de eventos** en `server/src/analytics/`: `EventSink` con inserciones por lote a una tabla `events`
-   append-only (JSONB, versión de esquema). Hooks en `RoomManager` para join, leave, grab, snap, complete,
-   sala creada y rotación global. Si falla, nunca debe afectar al juego.
+1. **Tracking de eventos: HECHO (2026-09-17).** Módulo `server/src/analytics/`:
+   - `events.ts`: tipos y payloads, `EVENT_SCHEMA_VERSION = 1`.
+   - `sink.ts`: `BufferedEventSink`, que escribe lotes cada 2 s o cada 500 eventos, con buffer acotado a 10 mil (descarta los más viejos) y reintento en el siguiente flush; nunca lanza errores. También `MemoryEventSink` para tests y `NoopEventSink`.
+   - `prismaEventStore.ts`: `createMany` con `skipDuplicates`.
+
+   Tabla `analytics_events` (migración `20260917100000_analytics_events`):
+   - `id` bigserial, que es el watermark del pipeline.
+   - `event_id` uuid único.
+   - `event_type`, `schema_version`, `occurred_at`, `ingested_at`.
+   - `session_id` (socket), `client_id`, `room_slug`, `room_type`, `puzzle_id` (`slug:seed`) y `payload` jsonb.
+
+   Eventos: `room_created`, `puzzle_started` (source create/restart/queue/reshuffle/default), `player_joined` (con nombre y color, por decisión del usuario),
+   `join_failed`, `player_left` (disconnect/switch, duration_ms), `piece_grabbed`, `grab_conflict`, `piece_dropped` (hold_ms, snapped, frame,
+   merged_groups, group_size), `piece_abandoned` (left/regrab/timeout), `puzzle_completed` (contributors), `global_rotated` (auto/admin) y `room_expired`.
+   `group:move` no se registra. El usuario eligió grab y drop como eventos separados.
 2. **Simulador de jugadores** en `tools/simulator/`: bots por Socket.IO con comportamiento realista y modo backfill
    para generar días de historia.
 3. **Pipeline** en `analytics/` (Python, pytest): extract incremental Postgres → bronze Parquet con watermark;
@@ -232,13 +244,17 @@ Está en las redes proxy, internal y socket para chequear la app, Postgres, Gara
 Configurado por el usuario: admin de Kuma, webhook de Discord, monitores (app, sitio público, Postgres, push del backup y otros),
 página pública `https://status.luisjgl.cloud/status/puzzlelove` y UptimeRobot externo. `BACKUP_PING_URL` está en el `.env` del VPS.
 
-**Ansible (escrito y probado en local):** `deploy/ansible/` con los roles base, users, ssh, firewall, fail2ban, swap, docker y app.
+**Ansible (aplicado al VPS el 2026-09-17; la simulación posterior dio `changed=0`):** `deploy/ansible/` con los roles base, users, ssh, firewall, fail2ban, swap, docker y app.
 Toolchain fijo en Docker (`ansible==14.4.0`, `ansible-lint==26.8.0`); `run.ps1` monta `~/.ssh` y fija `ANSIBLE_CONFIG`, porque
 Ansible ignora `ansible.cfg` en directorios de Windows montados (world-writable). `test/run.sh` usa un contenedor systemd privilegiado,
 aplica dos corridas y exige `changed=0`; la swap se salta con `swap_enabled: false`. CI corre `ansible-lint` (perfil production).
 rsync del deploy excluye `ansible/`.
 
-**Pendiente:** correr `run.ps1 --check --diff` contra el VPS real y aplicar. Después, la plataforma de datos (sección 8).
+La primera simulación detectó diferencias reales: faltaban la línea de swap en `/etc/fstab` y `99-swap.conf`, porque los comandos manuales
+no se ejecutaron. Ansible las corrigió. Ejecución en Windows: `powershell -ExecutionPolicy Bypass -File .\deploy\ansible\run.ps1`.
+un.ps1`.
+
+**Infraestructura terminada.** Siguiente: la plataforma de datos (sección 8).
 
 ## 10. Reglas para el agente
 
