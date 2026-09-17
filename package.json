@@ -6,16 +6,17 @@
   "workspaces": [
     "shared",
     "server",
-    "client"
+    "client",
+    "tools/simulator"
   ],
   "scripts": {
     "dev": "concurrently -n server,client -c magenta,cyan \"npm run dev -w server\" \"npm run dev -w client\"",
     "db:embedded": "npm run db:embedded -w server",
     "db:migrate": "npm run db:migrate -w server",
-    "build": "npm run build -w client && npm run build -w server",
+    "build": "npm run build -w client && npm run build -w server && npm run build -w tools/simulator",
     "start": "npm run start -w server",
-    "test": "npm run test -w shared && npm run test -w server",
-    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client"
+    "test": "npm run test -w shared && npm run test -w server && npm run test -w tools/simulator",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w tools/simulator"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

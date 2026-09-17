@@ -157,6 +157,24 @@ services:
       resources:
         limits: { memory: 400M }
 
+  # Live bots that play the global room ("🤖 …", client_id "bot-…"); BOTS_MAX=0 disables them.
+  bots:
+    image: ${APP_IMAGE:-puzzlelove:local}
+    restart: unless-stopped
+    command: ['node', 'tools/simulator/dist/live.js']
+    depends_on:
+      app: { condition: service_healthy }
+    environment:
+      SIM_SERVER_URL: http://app:3001
+      BOTS_MAX: ${BOTS_MAX:-2}
+    healthcheck:
+      disable: true
+    networks: [proxy]
+    stop_grace_period: 5s
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
   # Daily encrypted backups of Postgres and Garage to Cloudflare R2 (see backup/backup.sh and docs/runbook.md).
   backup:
     image: ${BACKUP_IMAGE:-puzzlelove-backup:local}

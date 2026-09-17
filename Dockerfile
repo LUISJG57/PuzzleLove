@@ -1,4 +1,4 @@
-# PuzzleLove production image (monorepo: shared + server + client).
+# PuzzleLove production image (monorepo: shared + server + client + tools/simulator).
 # Targets:
 #   runtime  -> the app (default)
 #   migrate  -> one-shot `prisma migrate deploy`
@@ -14,6 +14,7 @@ COPY package.json package-lock.json ./
 COPY shared/package.json shared/
 COPY server/package.json server/
 COPY client/package.json client/
+COPY tools/simulator/package.json tools/simulator/
 # Install scripts are skipped (npm 11 blocks them anyway); Prisma is generated explicitly below.
 RUN npm ci --ignore-scripts
 
@@ -23,6 +24,7 @@ COPY tsconfig.base.json ./
 COPY shared shared
 COPY server server
 COPY client client
+COPY tools/simulator tools/simulator
 RUN npm run build
 
 # ---------------------------------------------------------------- migrations
@@ -48,6 +50,9 @@ COPY --from=build --chown=node:node /app/package.json package.json
 COPY --from=build --chown=node:node /app/server/package.json server/package.json
 COPY --from=build --chown=node:node /app/server/dist server/dist
 COPY --from=build --chown=node:node /app/client/dist client/dist
+# Live bots (docker-compose `bots` service) run from the same image.
+COPY --from=build --chown=node:node /app/tools/simulator/package.json tools/simulator/package.json
+COPY --from=build --chown=node:node /app/tools/simulator/dist tools/simulator/dist
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
