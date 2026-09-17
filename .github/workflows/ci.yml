@@ -37,3 +37,20 @@ jobs:
           python-version: '3.13'
       - run: pip install ansible==14.4.0 ansible-lint==26.8.0
       - run: ansible-lint --offline site.yml
+
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      # PySpark tests run in the same image as production (Java 21, Delta and S3A jars baked in).
+      - name: Build pipeline test image
+        uses: docker/build-push-action@v7
+        with:
+          context: analytics
+          target: test
+          load: true
+          tags: puzzlelove-pipeline-test
+          cache-from: type=gha,scope=pipeline
+          cache-to: type=gha,scope=pipeline,mode=max
+      - run: docker run --rm puzzlelove-pipeline-test

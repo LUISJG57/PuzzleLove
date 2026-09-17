@@ -15,9 +15,13 @@ COMPOSE_FILES=(-f docker-compose.prod.yml)
 if [[ -n "${COMPOSE_EXTRA:-}" ]]; then COMPOSE_FILES+=(-f "$COMPOSE_EXTRA"); fi
 compose() { docker compose "${COMPOSE_FILES[@]}" --env-file .env "$@"; }
 
-if [[ -f .deployed-images ]]; then
-  read -r APP_IMAGE MIGRATE_IMAGE BACKUP_IMAGE < .deployed-images
-  export APP_IMAGE MIGRATE_IMAGE BACKUP_IMAGE
+if [[ -f .deployed-release ]]; then
+  read -r repo tag < .deployed-release
+  [[ $repo == "-" ]] && repo=""
+  export APP_IMAGE="${repo}puzzlelove:$tag" BACKUP_IMAGE="${repo}puzzlelove-backup:$tag"
+elif [[ -f .deployed-images ]]; then
+  read -r APP_IMAGE _ BACKUP_IMAGE < .deployed-images
+  export APP_IMAGE BACKUP_IMAGE
 fi
 
 run_backup() { compose run --rm --no-deps -T backup backup.sh "$@"; }

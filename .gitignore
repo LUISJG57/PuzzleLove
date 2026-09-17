@@ -7,5 +7,9 @@ server/.pgdata/
 .DS_Store
 deploy/traefik/users
 deploy/.deployed-images
+deploy/.deployed-release
 .codegraph/
 deploy/ansible/test/.work/
+__pycache__/
+.pytest_cache/
+.venv/

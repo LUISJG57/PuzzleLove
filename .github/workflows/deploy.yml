@@ -23,9 +23,8 @@ jobs:
       contents: read
       packages: write
     outputs:
-      app: ${{ steps.refs.outputs.app }}
-      migrate: ${{ steps.refs.outputs.migrate }}
-      backup: ${{ steps.refs.outputs.backup }}
+      repo: ${{ steps.refs.outputs.repo }}
+      tag: ${{ steps.refs.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -35,12 +34,16 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           tag="sha-${GITHUB_SHA::7}"
           {
+            echo "repo=ghcr.io/$owner/"
+            echo "tag=$tag"
             echo "app=ghcr.io/$owner/puzzlelove:$tag"
             echo "migrate=ghcr.io/$owner/puzzlelove-migrate:$tag"
             echo "app_latest=ghcr.io/$owner/puzzlelove:latest"
             echo "migrate_latest=ghcr.io/$owner/puzzlelove-migrate:latest"
             echo "backup=ghcr.io/$owner/puzzlelove-backup:$tag"
             echo "backup_latest=ghcr.io/$owner/puzzlelove-backup:latest"
+            echo "pipeline=ghcr.io/$owner/puzzlelove-pipeline:$tag"
+            echo "pipeline_latest=ghcr.io/$owner/puzzlelove-pipeline:latest"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
@@ -85,6 +88,17 @@ jobs:
           cache-from: type=gha,scope=backup
           cache-to: type=gha,scope=backup,mode=max
 
+      - name: Build and push pipeline image
+        uses: docker/build-push-action@v7
+        with:
+          context: analytics
+          target: runtime
+          push: true
+          tags: |
+            ${{ steps.refs.outputs.pipeline }}
+            ${{ steps.refs.outputs.pipeline_latest }}
+          cache-from: type=gha,scope=pipeline
+
   deploy:
     needs: images
     runs-on: ubuntu-latest
@@ -114,7 +128,6 @@ jobs:
       - name: Deploy release
         env:
           TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
-          APP_IMAGE: ${{ needs.images.outputs.app }}
-          MIGRATE_IMAGE: ${{ needs.images.outputs.migrate }}
-          BACKUP_IMAGE: ${{ needs.images.outputs.backup }}
-        run: ssh -i ~/.ssh/id_deploy "$TARGET" "bash /opt/puzzlelove/deploy.sh '$APP_IMAGE' '$MIGRATE_IMAGE' '$BACKUP_IMAGE'"
+          IMAGE_REPO: ${{ needs.images.outputs.repo }}
+          IMAGE_TAG: ${{ needs.images.outputs.tag }}
+        run: ssh -i ~/.ssh/id_deploy "$TARGET" "IMAGE_REPO='$IMAGE_REPO' bash /opt/puzzlelove/deploy.sh '$IMAGE_TAG'"

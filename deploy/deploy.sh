@@ -1,22 +1,52 @@
 #!/usr/bin/env bash
 # Deploys a PuzzleLove release on the VPS. Run from the deploy directory (/opt/puzzlelove):
-#   ./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234 \n#               ghcr.io/<owner>/puzzlelove-backup:sha-abc1234
+#   IMAGE_REPO=ghcr.io/<owner>/ ./deploy.sh sha-abc1234   # deploy that tag of every image
+#   ./deploy.sh                                            # re-apply the current release (e.g. after editing .env)
+# Images: <IMAGE_REPO>puzzlelove, -migrate, -backup and -pipeline, all with the same tag.
 # On failure it redeploys the previous release and exits non-zero.
 # Migrations are not rolled back: they must stay backward compatible with the previous release.
 set -euo pipefail
 cd "$(dirname "$0")"
-
-if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <app-image> <migrate-image> <backup-image>" >&2
-  exit 2
-fi
 
 COMPOSE_FILES=(-f docker-compose.prod.yml)
 # Set COMPOSE_EXTRA=docker-compose.local.yml to rehearse a deploy on Docker Desktop.
 if [[ -n "${COMPOSE_EXTRA:-}" ]]; then COMPOSE_FILES+=(-f "$COMPOSE_EXTRA"); fi
 compose() { docker compose "${COMPOSE_FILES[@]}" --env-file .env "$@"; }
 
-STATE_FILE=.deployed-images
+STATE_FILE=.deployed-release
+LEGACY_STATE_FILE=.deployed-images
+
+# Prints "<repo or -> <tag>" for the current release, if any.
+current_release() {
+  if [[ -f $STATE_FILE ]]; then
+    cat "$STATE_FILE"
+  elif [[ -f $LEGACY_STATE_FILE ]]; then
+    # Older deploys stored full image references: ghcr.io/owner/puzzlelove:sha-abc ...
+    local app
+    read -r app _ < "$LEGACY_STATE_FILE"
+    local repo=${app%puzzlelove:*}
+    echo "${repo:--} ${app##*:}"
+  fi
+}
+
+if [[ $# -gt 1 ]]; then
+  echo "usage: $0 [tag]" >&2
+  exit 2
+fi
+previous_repo="" previous_tag=""
+read -r previous_repo previous_tag <<< "$(current_release)" || true
+[[ $previous_repo == "-" ]] && previous_repo=""
+if [[ $# -eq 1 ]]; then
+  repo=${IMAGE_REPO:-}
+  tag=$1
+elif [[ -n $previous_tag ]]; then
+  repo=$previous_repo
+  tag=$previous_tag
+else
+  echo "no release deployed yet; pass a tag" >&2
+  exit 2
+fi
+
 DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d= -f2-)
 ACME_CA_SERVER=$(grep -E '^ACME_CA_SERVER=' .env | cut -d= -f2- || true)
 
@@ -34,28 +64,28 @@ health_check() {
 }
 
 release() {
-  export APP_IMAGE=$1 MIGRATE_IMAGE=$2 BACKUP_IMAGE=$3
+  local r=$1 t=$2
+  export APP_IMAGE="${r}puzzlelove:$t" MIGRATE_IMAGE="${r}puzzlelove-migrate:$t" \
+    BACKUP_IMAGE="${r}puzzlelove-backup:$t" PIPELINE_IMAGE="${r}puzzlelove-pipeline:$t"
   echo "==> deploying $APP_IMAGE"
-  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup; fi
+  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup pipeline; fi
+  compose up -d --wait --wait-timeout 120 garage && bash garage/init-lake.sh
   compose up -d --remove-orphans --wait --wait-timeout 180 && health_check
 }
 
-previous=()
-if [[ -f $STATE_FILE ]]; then read -r -a previous < "$STATE_FILE"; fi
-
-if release "$1" "$2" "$3"; then
-  echo "$1 $2 $3" > "$STATE_FILE"
+if release "$repo" "$tag"; then
+  echo "${repo:--} $tag" > "$STATE_FILE"
+  rm -f "$LEGACY_STATE_FILE"
   docker image prune -f >/dev/null
-  echo "==> deployed $1"
+  echo "==> deployed $tag"
   exit 0
 fi
 
-echo "==> deploy of $1 failed" >&2
+echo "==> deploy of $tag failed" >&2
 compose logs --tail 50 app migrate >&2 || true
-if [[ ${#previous[@]} -ge 2 ]]; then
-  echo "==> rolling back to ${previous[0]}" >&2
-  # Releases recorded before backups existed have no backup image; keep the new one.
-  if release "${previous[0]}" "${previous[1]}" "${previous[2]:-$3}"; then
+if [[ -n $previous_tag && "$previous_repo$previous_tag" != "$repo$tag" ]]; then
+  echo "==> rolling back to $previous_tag" >&2
+  if release "$previous_repo" "$previous_tag"; then
     echo "==> rollback succeeded" >&2
   else
     echo "==> ROLLBACK FAILED, manual intervention needed" >&2

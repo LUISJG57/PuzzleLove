@@ -173,7 +173,7 @@ export function generateHistory(opts: GenerateOptions): SimEvent[] {
       }
 
       const player = active[Math.floor(rng() * active.length)];
-      t += timing.thinkMs(rng) / Math.sqrt(active.length);
+      t += Math.floor(timing.thinkMs(rng) / Math.sqrt(active.length));
       if (t >= until || t >= player.leaveAt) continue;
 
       if (active.length > 1 && rng() < 0.04) {

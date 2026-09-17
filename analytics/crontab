@@ -1,0 +1,2 @@
+# Daily at 04:30 America/Mexico_City, after the 03:30 backup.
+30 4 * * * python -m pipeline run

@@ -1,4 +1,4 @@
-# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2 + Uptime Kuma.
+# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2 + Uptime Kuma + analytics pipeline.
 #
 # On the VPS (from this directory):
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -174,6 +174,28 @@ services:
     deploy:
       resources:
         limits: { memory: 128M }
+
+  # Daily analytics pipeline (04:30 America/Mexico_City): analytics_events -> Delta lake in Garage -> warehouse schema.
+  pipeline:
+    image: ${PIPELINE_IMAGE:-puzzlelove-pipeline:local}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGUSER: puzzlelove
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: puzzlelove
+      LAKE_PATH: s3a://lake
+      LAKE_S3_ENDPOINT: http://garage:3900
+      LAKE_ACCESS_KEY_ID: ${LAKE_ACCESS_KEY_ID:-}
+      LAKE_SECRET_ACCESS_KEY: ${LAKE_SECRET_ACCESS_KEY:-}
+      SPARK_DRIVER_MEMORY: 2g
+    networks: [internal]
+    deploy:
+      resources:
+        limits: { memory: 3G }
 
   # Daily encrypted backups of Postgres and Garage to Cloudflare R2 (see backup/backup.sh and docs/runbook.md).
   backup:

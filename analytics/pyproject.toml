@@ -1,0 +1,18 @@
+[project]
+name = "puzzlelove-pipeline"
+version = "0.1.0"
+description = "PuzzleLove analytics: Postgres events -> Delta lake (bronze/silver/gold) -> Postgres warehouse"
+requires-python = ">=3.13"
+dependencies = [
+  "pyspark==4.2.0",
+  "delta-spark==4.4.0",
+  "psycopg[binary]==3.3.5",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
