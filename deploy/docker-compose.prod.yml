@@ -1,4 +1,4 @@
-# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2.
+# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2 + Uptime Kuma.
 #
 # On the VPS (from this directory):
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -197,6 +197,36 @@ services:
       resources:
         limits: { memory: 256M }
 
+  # Monitoring and public status page at status.$DOMAIN (monitors and Discord alerts are configured in its UI).
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.5-slim-rootless
+    restart: unless-stopped
+    environment:
+      # Skip the first-run database picker; SQLite in the data volume is enough here.
+      UPTIME_KUMA_DB_TYPE: sqlite
+    volumes:
+      - uptime-kuma:/app/data
+    # proxy: Traefik and outbound checks/Discord; internal: TCP checks of postgres/garage and backup pings;
+    # socket: container status through the read-only socket proxy.
+    networks: [proxy, internal, socket]
+    labels:
+      traefik.enable: 'true'
+      # Admin UI: basic auth in front of Uptime Kuma's own login.
+      traefik.http.routers.status.rule: Host(`status.${DOMAIN}`)
+      traefik.http.routers.status.entrypoints: websecure
+      traefik.http.routers.status.middlewares: dashboard-auth@file
+      # Public status pages and the assets they need.
+      traefik.http.routers.status-public.rule: >-
+        Host(`status.${DOMAIN}`) && (PathPrefix(`/status/`) || PathPrefix(`/api/status-page/`) ||
+        PathPrefix(`/assets/`) || PathPrefix(`/upload/`) || Path(`/icon.svg`) || Path(`/favicon.ico`) ||
+        Path(`/manifest.json`))
+      traefik.http.routers.status-public.entrypoints: websecure
+      traefik.http.routers.status-public.middlewares: ratelimit@file
+      traefik.http.services.status.loadbalancer.server.port: 3001
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
 networks:
   proxy:
   socket:
@@ -210,3 +240,4 @@ volumes:
   pgdata:
   garage-meta:
   garage-data:
+  uptime-kuma:
