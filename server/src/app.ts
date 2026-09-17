@@ -6,12 +6,14 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import { PIECE_COUNT_OPTIONS } from '@puzzlelove/shared';
+import { TRAFFIC_FILTERS, type TrafficFilter, type WarehouseReader } from './analytics/warehouse';
 import type { Config } from './config';
 import type { Repo } from './db/repo';
 import { ImageError, MAX_UPLOAD_BYTES, processImage } from './images';
 import { imageUrl, type RoomManager } from './rooms/RoomManager';
 import { IMAGE_KEY_PATTERN, type ImageStorage } from './storage';
 
+const ANALYTICS_DAYS = [7, 14, 30, 90];
 const ADMIN_COOKIE = 'pl_admin';
 const ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -20,6 +22,8 @@ export interface AppDeps {
   manager: RoomManager;
   storage: ImageStorage;
   repo: Repo;
+  /** Analytics dashboards from the pipeline's warehouse; absent in tests and local dev without the pipeline. */
+  warehouse?: WarehouseReader;
   /** Max private rooms created per IP per hour. */
   roomCreateLimit?: number;
 }
@@ -30,7 +34,7 @@ function sameSecret(a: string, b: string) {
   return timingSafeEqual(ha, hb);
 }
 
-export function createApp({ config, manager, storage, repo, roomCreateLimit = 10 }: AppDeps) {
+export function createApp({ config, manager, storage, repo, warehouse, roomCreateLimit = 10 }: AppDeps) {
   const app = express();
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
@@ -165,6 +169,19 @@ export function createApp({ config, manager, storage, repo, roomCreateLimit = 10
   app.post('/api/admin/next', requireAdmin, async (_req, res) => {
     await manager.rotateGlobal();
     res.json({ ok: true });
+  });
+
+  app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
+    const days = ANALYTICS_DAYS.includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+    const traffic = (TRAFFIC_FILTERS as readonly string[]).includes(String(req.query.traffic))
+      ? (req.query.traffic as TrafficFilter)
+      : 'all';
+    if (!warehouse) {
+      res.json({ available: false, reason: 'no_warehouse' });
+      return;
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json(await warehouse.dashboard({ days, traffic }));
   });
 
   app.use('/api', (_req, res) => {

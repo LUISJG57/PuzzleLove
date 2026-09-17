@@ -160,6 +160,15 @@ describe('HTTP', () => {
     expect((await agent.get('/api/admin/status')).body.queue).toHaveLength(0);
   });
 
+  it('serves analytics only to admins and reports a missing warehouse', async () => {
+    expect((await request(app).get('/api/admin/analytics')).status).toBe(401);
+    const agent = request.agent(app);
+    await agent.post('/api/admin/login').send({ password: 'secret' });
+    const res = await agent.get('/api/admin/analytics?days=7&traffic=human');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ available: false, reason: 'no_warehouse' });
+  });
+
   it('deletes private rooms after 24 hours without activity', async () => {
     const slug = await createRoom();
     const room = (await repo.getRoom(slug))!;

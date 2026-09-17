@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { PrismaEventStore } from './analytics/prismaEventStore';
 import { BufferedEventSink } from './analytics/sink';
+import { PrismaWarehouseReader } from './analytics/warehouse';
 import { createApp } from './app';
 import { loadConfig } from './config';
 import { PrismaRepo } from './db/prismaRepo';
@@ -23,7 +24,7 @@ async function main() {
   registerSockets(io, manager);
   await manager.init();
 
-  const app = createApp({ config, manager, storage, repo });
+  const app = createApp({ config, manager, storage, repo, warehouse: new PrismaWarehouseReader(repo.prisma) });
   httpServer.on('request', app);
   httpServer.listen(config.port, () => {
     console.log(`[server] PuzzleLove listening on http://localhost:${config.port}`);

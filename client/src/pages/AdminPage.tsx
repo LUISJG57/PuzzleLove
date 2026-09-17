@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { IconX } from '../components/Icons';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { prepareImage, readError } from '../lib/upload';
+import { AnalyticsPanel } from './AnalyticsPanel';
 
 interface QueueEntry {
   id: string;
@@ -24,6 +25,7 @@ export function AdminPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'game' | 'analytics'>('game');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -95,7 +97,7 @@ export function AdminPage() {
   };
 
   return (
-    <div className="page">
+    <div className={`page${status?.authenticated && tab === 'analytics' ? ' page-wide' : ''}`}>
       <header className="page-header">
         <Link to="/" className="brand">
           <span aria-hidden="true">🧩</span>
@@ -125,7 +127,7 @@ export function AdminPage() {
           </button>
         </form>
       ) : (
-        <main className="card admin-card">
+        <main className={`card admin-card${tab === 'analytics' ? ' wide' : ''}`}>
           <div className="row between">
             <h1>{t('admin.title')}</h1>
             <button className="btn ghost" type="button" onClick={logout}>
@@ -133,7 +135,17 @@ export function AdminPage() {
             </button>
           </div>
 
-          {status.global && (
+          <div className="segmented tabs" role="tablist">
+            {(['game', 'analytics'] as const).map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+                {t(`admin.tabs.${k}`)}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'analytics' && <AnalyticsPanel />}
+
+          {tab === 'game' && status.global && (
             <section className="admin-section">
               <div className="field-label">{t('admin.current')}</div>
               <div className="current-global">
@@ -157,42 +169,44 @@ export function AdminPage() {
             </section>
           )}
 
-          <section className="admin-section">
-            <div className="row between">
-              <div className="field-label">
-                {t('admin.queue')} ({status.queue?.length ?? 0})
+          {tab === 'game' && (
+            <section className="admin-section">
+              <div className="row between">
+                <div className="field-label">
+                  {t('admin.queue')} ({status.queue?.length ?? 0})
+                </div>
+                <button className="btn primary" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+                  {busy ? t('admin.uploading') : t('admin.upload')}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    void upload(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
               </div>
-              <button className="btn primary" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
-                {busy ? t('admin.uploading') : t('admin.upload')}
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => {
-                  void upload(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-            {error && <p className="error">{error}</p>}
-            {status.queue && status.queue.length > 0 ? (
-              <ol className="queue">
-                {status.queue.map((q, i) => (
-                  <li key={q.id}>
-                    <img src={q.imageUrl} alt="" />
-                    <span className="queue-pos">{i + 1}</span>
-                    <button className="icon-btn danger" type="button" onClick={() => remove(q.id)} aria-label={t('common.delete')}>
-                      <IconX />
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="muted">{t('admin.queueEmpty')}</p>
-            )}
-          </section>
+              {error && <p className="error">{error}</p>}
+              {status.queue && status.queue.length > 0 ? (
+                <ol className="queue">
+                  {status.queue.map((q, i) => (
+                    <li key={q.id}>
+                      <img src={q.imageUrl} alt="" />
+                      <span className="queue-pos">{i + 1}</span>
+                      <button className="icon-btn danger" type="button" onClick={() => remove(q.id)} aria-label={t('common.delete')}>
+                        <IconX />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted">{t('admin.queueEmpty')}</p>
+              )}
+            </section>
+          )}
         </main>
       )}
     </div>
