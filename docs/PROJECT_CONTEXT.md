@@ -170,8 +170,17 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
    `join_failed`, `player_left` (disconnect/switch, duration_ms), `piece_grabbed`, `grab_conflict`, `piece_dropped` (hold_ms, snapped, frame,
    merged_groups, group_size), `piece_abandoned` (left/regrab/timeout), `puzzle_completed` (contributors), `global_rotated` (auto/admin) y `room_expired`.
    `group:move` no se registra. El usuario eligió grab y drop como eventos separados.
-2. **Simulador de jugadores** en `tools/simulator/`: bots por Socket.IO con comportamiento realista y modo backfill
-   para generar días de historia.
+2. **Simulador de jugadores: HECHO (2026-09-17).** Workspace `tools/simulator/`:
+   - `strategy.ts` (`planMove`): elige grupos (prefiere piezas sueltas) y apunta al marco o a un vecino con probabilidad `skill × progreso`.
+   - `behavior.ts`: lognormales para think, hold y sesión; curva horaria en America/Mexico_City con boost de fin de semana.
+   - `personas.ts`: 12 bots `🤖 Nombre` con `bot-…` y una población sintética `sim-0001…` con pesos tipo Zipf.
+   - **`live.ts`:** bots reales por Socket.IO **en producción**, por decisión del usuario. Servicio `bots` del compose con la misma imagen de la app;
+     `BOTS_MAX` (default 2) escalado por la curva horaria; 0 los apaga. Usa unos 25 MB.
+   - **`generate.ts` + `backfill.ts`:** historia sintética usando el motor real (`releaseGroup`), determinista por seed. Inserta en lotes con
+     `is_synthetic = true` (migración `20260917120000_analytics_events_synthetic`); pide `--yes` y acepta `--purge` y `--dry-run`.
+     28 días ≈ 600 mil eventos, unos 4 mil puzzles y 150 jugadores; en local tarda unos 22 s y ocupa unos 257 MB. El usuario decidió que el backfill va **solo en local**.
+   - Tests (vitest): orden temporal, determinismo, consistencia de sesiones (join primero, leave al final, cada grab se resuelve) y merges = piezas − 1 por puzzle completado.
+   - Para filtrar en el pipeline: `is_synthetic` (backfill) y `client_id LIKE 'bot-%'` (bots en vivo).
 3. **Pipeline** en `analytics/` (Python, pytest): extract incremental Postgres → bronze Parquet con watermark;
    PySpark a silver (tipado, deduplicado, sesiones) y gold (fact_puzzle, fact_snap, fact_session, dim_player,
    dim_room, dim_date, agregados diarios, embudo por dificultad, heatmap por hora); load gold → `warehouse` por JDBC;

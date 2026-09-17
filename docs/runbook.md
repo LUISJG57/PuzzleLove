@@ -171,6 +171,20 @@ Las alertas llegan a **Discord** por webhook, que se configura en Kuma → Setti
 Como Kuma corre en el mismo VPS, no puede avisar si se cae la máquina entera. Para eso existe un monitor externo en
 **UptimeRobot** (plan gratis) sobre `https://luisjgl.cloud/api/health`, que también alerta a Discord.
 
+## Bots y datos sintéticos
+
+**Bots en vivo:** el servicio `bots` juega la sala global con nombres `🤖 …` (`client_id` `bot-…`). La cantidad sigue la curva
+horaria de México hasta `BOTS_MAX` (default 2). Para apagarlos, pon `BOTS_MAX=0` en `.env` y corre `./deploy.sh $(cat .deployed-images)`.
+
+**Backfill (solo en local):** genera semanas de historia en `analytics_events` con `is_synthetic = true`:
+```bash
+cd deploy
+PW=$(grep ^POSTGRES_PASSWORD .env | cut -d= -f2)
+docker run --rm --network puzzlelove_internal -e DATABASE_URL="postgresql://puzzlelove:$PW@postgres:5432/puzzlelove" \
+  puzzlelove:local node tools/simulator/dist/backfill.js --days 28 --seed 42 --purge --yes
+```
+`--dry-run` solo muestra el resumen. `--purge` borra antes los sintéticos previos, así que se puede correr varias veces.
+
 ## Ensayo local del deploy (Docker Desktop)
 ```bash
 cd deploy
