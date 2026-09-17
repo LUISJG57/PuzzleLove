@@ -14,6 +14,7 @@ Internet ──► firewall hPanel ──► UFW (22, 80, 443)
                  red internal │
                   ┌───────────┴───────────┐
                Postgres 17            Garage (S3)
+                  └───────── backup ──────┘ ──(age)──► Cloudflare R2
 ```
 
 Solo Traefik publica puertos. Docker se salta UFW, así que ningún otro servicio debe usar `ports:`.
@@ -23,10 +24,10 @@ Solo Traefik publica puertos. Docker se salta UFW, así que ningún otro servici
 Es automático: cada push a `main` corre `.github/workflows/deploy.yml`.
 
 1. **`test`:** typecheck y tests.
-2. **`images`:** construye y sube `ghcr.io/<owner>/puzzlelove:sha-xxxxxxx` y `puzzlelove-migrate:sha-xxxxxxx`.
+2. **`images`:** construye y sube `ghcr.io/<owner>/puzzlelove`, `puzzlelove-migrate` y `puzzlelove-backup` con el tag `sha-xxxxxxx`.
 3. **`deploy`:**
    - Hace `rsync` de `deploy/` al VPS.
-   - Corre `deploy.sh <app-image> <migrate-image>`, que hace pull, aplica las migraciones y ejecuta `up --wait`.
+   - Corre `deploy.sh <app-image> <migrate-image> <backup-image>`, que hace pull, aplica las migraciones y ejecuta `up --wait`.
    - Verifica `/api/health` a través de Traefik. Si falla, vuelve a la release anterior y el job queda en rojo.
 
 La release activa se guarda en `/opt/puzzlelove/.deployed-images`.
@@ -50,7 +51,7 @@ docker stats --no-stream       # memoria
 
 ### Rollback manual a una release concreta
 ```bash
-./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234
+./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234 ghcr.io/<owner>/puzzlelove-backup:sha-abc1234
 ```
 También se puede relanzar un deploy anterior desde GitHub → Actions → Deploy → *Re-run jobs*.
 
@@ -86,10 +87,44 @@ dc up -d traefik
 ```
 La renovación es automática: Traefik renueva cada certificado 30 días antes de que venza.
 
+## Backups
+
+El servicio `backup` corre todos los días a las **03:30 (America/Mexico_City)**:
+1. Hace `pg_dump -Fc` de Postgres y un `tar` de todas las imágenes del bucket de Garage.
+2. Cifra ambos archivos con **age** usando la llave pública `BACKUP_AGE_RECIPIENT`.
+3. Los sube a R2:
+   - `postgres/AAAA/MM/puzzlelove-<stamp>.dump.age`
+   - `garage/AAAA/MM/images-<stamp>.tar.age`
+4. Borra los archivos con más de **30 días**.
+
+**La llave privada de age no está en el servidor.** Guárdala en tu gestor de contraseñas y en tu PC.
+Si se pierde, los backups no se pueden leer.
+
+```bash
+dc exec backup backup.sh run      # backup manual inmediato
+dc exec backup backup.sh list     # listar lo que hay en R2
+dc logs --tail 50 backup          # resultado de la última corrida
+```
+
+### Probar una restauración (sin tocar producción)
+Desde tu PC en PowerShell. La llave privada viaja por stdin y no se escribe en el disco del VPS:
+```powershell
+Get-Content "$env:USERPROFILE\.age\puzzlelove-backup.key" | ssh luis@2.25.230.57 "bash /opt/puzzlelove/restore.sh test"
+```
+El comando descarga el último backup, lo restaura en un Postgres temporal dentro del contenedor y muestra el conteo de filas y de imágenes.
+Hazlo al menos una vez al mes.
+
+### Restaurar producción
+Detiene la app, restaura Postgres (`--clean`) y copia las imágenes de vuelta a Garage. Luego vuelve a levantar la app.
+```powershell
+Get-Content "$env:USERPROFILE\.age\puzzlelove-backup.key" | ssh luis@2.25.230.57 "bash /opt/puzzlelove/restore.sh prod latest --yes"
+```
+Para una fecha concreta, usa el stamp en lugar de `latest`, por ejemplo `20260918T093000Z`. Los stamps se ven con `restore.sh list`.
+
 ## Ensayo local del deploy (Docker Desktop)
 ```bash
 cd deploy
-COMPOSE_EXTRA=docker-compose.local.yml bash deploy.sh puzzlelove:local puzzlelove-migrate:local
+COMPOSE_EXTRA=docker-compose.local.yml bash deploy.sh puzzlelove:local puzzlelove-migrate:local puzzlelove-backup:local
 ```
 
 ## Problemas conocidos

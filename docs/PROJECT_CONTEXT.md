@@ -211,8 +211,18 @@ Solo Traefik publica puertos (Docker se salta UFW).
 vía Traefik y hace rollback automático). Deploy y rollback ensayados en local con `COMPOSE_EXTRA=docker-compose.local.yml`.
 Operación y primera instalación en `docs/runbook.md`.
 
-**Pendiente:** primer deploy real (repo en GitHub, secrets, `.env` en el VPS, staging → producción de Let's Encrypt), Ansible,
-backups a R2 y monitoreo.
+**En producción desde 2026-09-17:** repo `github.com/LUISJG57/PuzzleLove` (público), environment `production` con secrets
+`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` (llave `puzzlelove_actions`) y `VPS_KNOWN_HOSTS`. Imágenes públicas en GHCR
+(`ghcr.io/luisjg57/puzzlelove`). Certificados de Let's Encrypt de producción para `luisjgl.cloud` y `traefik.luisjgl.cloud`.
+El `.env` y `traefik/users` solo existen en `/opt/puzzlelove` en el VPS.
+
+**Backups (escritos y probados en local, falta configurar R2):** servicio `backup` (`deploy/backup/`: postgres:17-alpine + rclone +
+age + supercronic). Corre diario a las 03:30 America/Mexico_City: `pg_dump` y tar de Garage cifrados con age → R2, con retención de 30 días.
+`deploy/restore.sh test|prod` recibe la llave privada de age por stdin (nunca vive en el VPS). `deploy.sh` ahora recibe 3 imágenes
+(app, migrate y backup). En local, R2 se simula con un segundo bucket de Garage.
+
+**Pendiente:** cuenta de Cloudflare y R2 del usuario, variables `R2_*` y `BACKUP_AGE_RECIPIENT` en el `.env` del VPS, primer test-restore real,
+monitoreo (Uptime Kuma, con `BACKUP_PING_URL`) y Ansible.
 
 ## 10. Reglas para el agente
 
