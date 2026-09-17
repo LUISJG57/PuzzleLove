@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.env
+**/*.log
+.git
+.codegraph
+.github
+docs
+deploy
+server/.pgdata
+server/data
+docker-compose.yml
