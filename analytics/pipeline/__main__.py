@@ -12,6 +12,8 @@ import sys
 import time
 import traceback
 
+from delta.tables import DeltaTable
+
 from . import bronze, gold, silver
 from .config import load
 from .load import publish
@@ -37,6 +39,12 @@ def run(full_refresh: bool) -> int:
         spark = create_session(cfg)
         log(f"run {run_id}: extracting ids > {watermark}{' (full refresh)' if full_refresh else ''}")
         new_watermark, counts["bronze_new_rows"] = bronze.extract(spark, cfg, watermark, run_id, full_refresh)
+        if not DeltaTable.isDeltaTable(spark, cfg.table_path("bronze", "events")):
+            # Fresh install with no events yet: nothing to build, and the next run starts from the same watermark.
+            counts["duration_s"] = round(time.time() - started)
+            runs.finish(run_id, "success", new_watermark, counts, checks)
+            log(f"run {run_id}: analytics_events is empty; nothing to do")
+            return 0
 
         bronze_all = spark.read.format("delta").load(cfg.table_path("bronze", "events"))
         new_rows = bronze_all if full_refresh else bronze_all.filter(bronze_all["_run_id"] == run_id)
