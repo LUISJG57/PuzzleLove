@@ -181,10 +181,25 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
      28 días ≈ 600 mil eventos, unos 4 mil puzzles y 150 jugadores; en local tarda unos 22 s y ocupa unos 257 MB. El usuario decidió que el backfill va **solo en local**.
    - Tests (vitest): orden temporal, determinismo, consistencia de sesiones (join primero, leave al final, cada grab se resuelve) y merges = piezas − 1 por puzzle completado.
    - Para filtrar en el pipeline: `is_synthetic` (backfill) y `client_id LIKE 'bot-%'` (bots en vivo).
-3. **Pipeline** en `analytics/` (Python, pytest): extract incremental Postgres → bronze Parquet con watermark;
-   PySpark a silver (tipado, deduplicado, sesiones) y gold (fact_puzzle, fact_snap, fact_session, dim_player,
-   dim_room, dim_date, agregados diarios, embudo por dificultad, heatmap por hora); load gold → `warehouse` por JDBC;
-   validaciones de calidad.
+3. **Pipeline: HECHO (2026-09-17).** `analytics/`: Python 3.13 con uv, PySpark 4.2 `local[2]` y **Delta Lake 4.4** sobre Java 21.
+   Imagen `analytics/Dockerfile` con targets `test` y `runtime` (supercronic 04:30 America/Mexico_City). Los jars (delta, hadoop-aws 3.5.0 con
+   awssdk bundle, postgresql 42.7.13) se resuelven al construir (`pipeline/jars.py`), así que en ejecución no se descarga nada. La imagen pesa unos 5.8 GB.
+   - `bronze.py`: JDBC incremental `id > watermark`, 4 particiones, append a `s3a://lake/bronze/events` particionado por `ingest_date`;
+     antes borra ids mayores al watermark, así que reintentar es idempotente.
+   - `silver.py`:
+     - `events`: dedup por `event_id` con MERGE; `is_bot`, `is_synthetic`, `event_date`/`hour_local`/`weekday` en hora de México.
+     - `moves`: grab → siguiente evento de la sesión (dropped/abandoned/open).
+     - `sessions`: join → siguiente leave en la misma sala, con estadísticas de moves.
+     - `json_field` castea números vía double: el generador emitía floats, y un cast estricto rompió la primera corrida.
+   - `gold.py`: dim_date, dim_player, dim_room, fact_puzzle (traffic_type synthetic/bot/mixed/human/none), fact_session, fact_move,
+     agg_daily_activity, agg_daily_puzzles, agg_hourly_heatmap y agg_difficulty (embudo started → played → completed).
+     Silver derivado y gold se recalculan completos en cada corrida (volumen chico).
+   - `quality.py`: 5 checks error y 2 warn. Si falla uno error, no se publica.
+   - `load.py`: JDBC a `warehouse._stg_*` y swap en una transacción (drop, rename, ALTER a timestamptz, PK e índices).
+     `createTableColumnTypes` no acepta TIMESTAMPTZ.
+   - `runs.py`: `warehouse.pipeline_runs` (status, watermark, row_counts, checks y error); las corridas colgadas quedan en failed.
+   - Local con 600 mil eventos: full refresh en unos 100 s; incremental de 55 eventos en unos 99 s. 6 tests de pytest en Docker; CI job `pipeline`.
+   - Garage: bucket `lake` con llave propia (`LAKE_ACCESS_KEY_ID`/`LAKE_SECRET_ACCESS_KEY`), que `deploy/garage/init-lake.sh` importa de forma idempotente.
 4. **Dashboard propio:** pestaña de analítica en `client/src/pages/AdminPage.tsx` con endpoint `/api/admin/analytics`.
 5. **Superset** configurado con conexión al warehouse y dashboard exportado como código.
 6. **Infra:** Dockerfiles, `deploy/docker-compose.prod.yml`, Traefik, playbook de Ansible, GitHub Actions,
@@ -239,8 +254,11 @@ El `.env` y `traefik/users` solo existen en `/opt/puzzlelove` en el VPS.
 
 **Backups (en producción; primer backup y test-restore real el 2026-09-17):** servicio `backup` (`deploy/backup/`: postgres:17-alpine + rclone +
 age + supercronic). Corre diario a las 03:30 America/Mexico_City: `pg_dump` y tar de Garage cifrados con age → R2, con retención de 30 días.
-`deploy/restore.sh test|prod` recibe la llave privada de age por stdin (nunca vive en el VPS). `deploy.sh` ahora recibe 3 imágenes
-(app, migrate y backup). En local, R2 se simula con un segundo bucket de Garage.
+`deploy/restore.sh test|prod` recibe la llave privada de age por stdin (nunca vive en el VPS). En local, R2 se simula con un segundo bucket de Garage.
+
+**Deploy por tag (desde el pipeline de datos):** `IMAGE_REPO=ghcr.io/luisjg57/ ./deploy.sh sha-xxxxxxx` despliega las 4 imágenes
+(`puzzlelove`, `-migrate`, `-backup` y `-pipeline`) con el mismo tag. La release activa queda en `.deployed-release` (`repo tag`), y el formato viejo `.deployed-images`
+se lee para el rollback. `./deploy.sh` sin argumentos vuelve a aplicar la release actual.
 
 R2: bucket `puzzlelove-backups` con token limitado a ese bucket. Llave privada de age en `%USERPROFILE%\.age\puzzlelove-backup.key`
 en la PC del usuario (y en su gestor de contraseñas).

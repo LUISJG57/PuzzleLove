@@ -28,10 +28,10 @@ Es automático: cada push a `main` corre `.github/workflows/deploy.yml`.
 2. **`images`:** construye y sube `ghcr.io/<owner>/puzzlelove`, `puzzlelove-migrate` y `puzzlelove-backup` con el tag `sha-xxxxxxx`.
 3. **`deploy`:**
    - Hace `rsync` de `deploy/` al VPS.
-   - Corre `deploy.sh <app-image> <migrate-image> <backup-image>`, que hace pull, aplica las migraciones y ejecuta `up --wait`.
+   - Corre `IMAGE_REPO=ghcr.io/<owner>/ deploy.sh <tag>` para las 4 imágenes (app, migrate, backup y pipeline): hace pull, prepara el bucket `lake`, aplica las migraciones y ejecuta `up --wait`.
    - Verifica `/api/health` a través de Traefik. Si falla, vuelve a la release anterior y el job queda en rojo.
 
-La release activa se guarda en `/opt/puzzlelove/.deployed-images`.
+La release activa se guarda en `/opt/puzzlelove/.deployed-release`.
 
 **Las migraciones no se revierten.** Toda migración debe ser compatible con la versión anterior de la app: primero se agregan columnas y en un deploy posterior se borran las viejas.
 
@@ -47,12 +47,12 @@ dc logs traefik | grep -v RequestMethod   # errores de Traefik o ACME
 docker stats --no-stream       # memoria
 
 # Volver a aplicar la release activa (p. ej. tras cambiar .env). No uses `dc up -d` sin imágenes:
-./deploy.sh $(cat .deployed-images)
+./deploy.sh
 ```
 
 ### Rollback manual a una release concreta
 ```bash
-./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234 ghcr.io/<owner>/puzzlelove-backup:sha-abc1234
+IMAGE_REPO=ghcr.io/<owner>/ ./deploy.sh sha-abc1234
 ```
 También se puede relanzar un deploy anterior desde GitHub → Actions → Deploy → *Re-run jobs*.
 
@@ -119,6 +119,21 @@ dc up -d traefik
 ```
 La renovación es automática: Traefik renueva cada certificado 30 días antes de que venza.
 
+## Pipeline de datos
+
+El contenedor `pipeline` corre todos los días a las **04:30 (America/Mexico_City)**:
+`analytics_events` → bronze → silver → gold, en Delta Lake dentro del bucket `lake` de Garage, y luego al schema `warehouse` de Postgres.
+
+```bash
+dc exec pipeline python -m pipeline run                  # corrida manual incremental
+dc exec pipeline python -m pipeline run --full-refresh   # reconstruye todas las capas
+dc logs --tail 40 pipeline
+dc exec postgres psql -U puzzlelove -c "select run_id, status, started_at, watermark_to, row_counts->>'duration_s' s, left(error, 200) from warehouse.pipeline_runs order by run_id desc limit 5"
+```
+
+Si falla una validación de severidad `error`, la corrida termina en `failed` y **no** publica en el warehouse, así que los dashboards conservan los datos anteriores.
+El lake no entra al backup diario porque se puede regenerar con `--full-refresh`; el schema `warehouse` sí va en el `pg_dump`.
+
 ## Backups
 
 El servicio `backup` corre todos los días a las **03:30 (America/Mexico_City)**:
@@ -174,7 +189,7 @@ Como Kuma corre en el mismo VPS, no puede avisar si se cae la máquina entera. P
 ## Bots y datos sintéticos
 
 **Bots en vivo:** el servicio `bots` juega la sala global con nombres `🤖 …` (`client_id` `bot-…`). La cantidad sigue la curva
-horaria de México hasta `BOTS_MAX` (default 2). Para apagarlos, pon `BOTS_MAX=0` en `.env` y corre `./deploy.sh $(cat .deployed-images)`.
+horaria de México hasta `BOTS_MAX` (default 2). Para apagarlos, pon `BOTS_MAX=0` en `.env` y corre `./deploy.sh`.
 
 **Backfill (solo en local):** genera semanas de historia en `analytics_events` con `is_synthetic = true`:
 ```bash
@@ -188,7 +203,7 @@ docker run --rm --network puzzlelove_internal -e DATABASE_URL="postgresql://puzz
 ## Ensayo local del deploy (Docker Desktop)
 ```bash
 cd deploy
-COMPOSE_EXTRA=docker-compose.local.yml bash deploy.sh puzzlelove:local puzzlelove-migrate:local puzzlelove-backup:local
+COMPOSE_EXTRA=docker-compose.local.yml bash deploy.sh local   # imágenes puzzlelove*:local
 ```
 
 ## Problemas conocidos
