@@ -216,13 +216,20 @@ Operación y primera instalación en `docs/runbook.md`.
 (`ghcr.io/luisjg57/puzzlelove`). Certificados de Let's Encrypt de producción para `luisjgl.cloud` y `traefik.luisjgl.cloud`.
 El `.env` y `traefik/users` solo existen en `/opt/puzzlelove` en el VPS.
 
-**Backups (escritos y probados en local, falta configurar R2):** servicio `backup` (`deploy/backup/`: postgres:17-alpine + rclone +
+**Backups (en producción; primer backup y test-restore real el 2026-09-17):** servicio `backup` (`deploy/backup/`: postgres:17-alpine + rclone +
 age + supercronic). Corre diario a las 03:30 America/Mexico_City: `pg_dump` y tar de Garage cifrados con age → R2, con retención de 30 días.
 `deploy/restore.sh test|prod` recibe la llave privada de age por stdin (nunca vive en el VPS). `deploy.sh` ahora recibe 3 imágenes
 (app, migrate y backup). En local, R2 se simula con un segundo bucket de Garage.
 
-**Pendiente:** cuenta de Cloudflare y R2 del usuario, variables `R2_*` y `BACKUP_AGE_RECIPIENT` en el `.env` del VPS, primer test-restore real,
-monitoreo (Uptime Kuma, con `BACKUP_PING_URL`) y Ansible.
+R2: bucket `puzzlelove-backups` con token limitado a ese bucket. Llave privada de age en `%USERPROFILE%\.age\puzzlelove-backup.key`
+en la PC del usuario (y en su gestor de contraseñas).
+
+**Monitoreo (escrito y probado en local):** servicio `uptime-kuma` (2.5.5-slim-rootless, SQLite vía `UPTIME_KUMA_DB_TYPE`)
+en `status.$DOMAIN`. El admin está detrás de `dashboard-auth`; las rutas `/status/`, `/api/status-page/` y `/assets/` son públicas.
+Está en las redes proxy, internal y socket para chequear la app, Postgres, Garage y los contenedores. El backup le avisa por `BACKUP_PING_URL`
+(push interno). Alertas a Discord; UptimeRobot externo cubre la caída total del VPS. Monitores listados en `docs/runbook.md`.
+
+**Pendiente:** registro DNS `status`, deploy del monitoreo, configurar Kuma y UptimeRobot, y Ansible.
 
 ## 10. Reglas para el agente
 

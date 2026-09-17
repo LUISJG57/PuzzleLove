@@ -15,6 +15,7 @@ Internet ──► firewall hPanel ──► UFW (22, 80, 443)
                   ┌───────────┴───────────┐
                Postgres 17            Garage (S3)
                   └───────── backup ──────┘ ──(age)──► Cloudflare R2
+                           uptime-kuma (status.) ──► Discord      UptimeRobot (externo) ──► Discord
 ```
 
 Solo Traefik publica puertos. Docker se salta UFW, así que ningún otro servicio debe usar `ports:`.
@@ -120,6 +121,24 @@ Detiene la app, restaura Postgres (`--clean`) y copia las imágenes de vuelta a 
 Get-Content "$env:USERPROFILE\.age\puzzlelove-backup.key" | ssh luis@2.25.230.57 "bash /opt/puzzlelove/restore.sh prod latest --yes"
 ```
 Para una fecha concreta, usa el stamp en lugar de `latest`, por ejemplo `20260918T093000Z`. Los stamps se ven con `restore.sh list`.
+
+## Monitoreo
+
+**Uptime Kuma** en `https://status.luisjgl.cloud`. El admin tiene dos capas: la basic auth de Traefik (`traefik/users`) y el login propio de Kuma.
+La página pública `https://status.luisjgl.cloud/status/puzzlelove` no pide contraseña.
+Las alertas llegan a **Discord** por webhook, que se configura en Kuma → Settings → Notifications.
+
+| Monitor | Tipo | Destino | Qué detecta |
+|---|---|---|---|
+| App (interno) | HTTP | `http://app:3001/api/health` | la app no responde |
+| Sitio público | HTTP | `https://luisjgl.cloud/api/health` (avisa si el certificado vence pronto) | Traefik, TLS o certificado |
+| Postgres | TCP | `postgres:5432` | base de datos caída |
+| Garage | TCP | `garage:3900` | almacenamiento caído |
+| Contenedores | Docker | host `tcp://socket-proxy:2375` | contenedor detenido o reiniciándose |
+| Backup diario | Push | intervalo de 25 h; URL en `BACKUP_PING_URL` | el backup no corrió o falló |
+
+Como Kuma corre en el mismo VPS, no puede avisar si se cae la máquina entera. Para eso existe un monitor externo en
+**UptimeRobot** (plan gratis) sobre `https://luisjgl.cloud/api/health`, que también alerta a Discord.
 
 ## Ensayo local del deploy (Docker Desktop)
 ```bash
