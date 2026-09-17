@@ -56,6 +56,37 @@ docker stats --no-stream       # memoria
 ```
 También se puede relanzar un deploy anterior desde GitHub → Actions → Deploy → *Re-run jobs*.
 
+## Aprovisionar con Ansible
+
+`deploy/ansible/` reproduce en código el endurecimiento del servidor:
+
+| Rol | Qué hace |
+|---|---|
+| `base` | paquetes base y actualizaciones de seguridad automáticas |
+| `users` | usuario `luis` con sudo y llaves SSH autorizadas (`group_vars/vps.yml`) |
+| `ssh` | `00-hardening.conf`: sin root, sin contraseñas, `AllowUsers`; valida con `sshd -t` antes de aplicar |
+| `firewall` | UFW: deny por defecto, SSH con límite de intentos, 80 y 443 |
+| `fail2ban` | jail de sshd con backend systemd |
+| `swap` | 4 GB de swap y `vm.swappiness=10` |
+| `docker` | Docker CE + Compose, `daemon.json` con rotación de logs y `live-restore` |
+| `app` | `/opt/puzzlelove` y un aviso si faltan `.env` o `traefik/users` |
+
+Corre desde Windows con Docker, sin instalar Ansible. Pide la contraseña de sudo de `luis`:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\ansible\run.ps1 --check --diff   # simulación
+powershell -ExecutionPolicy Bypass -File .\deploy\ansible\run.ps1                   # aplicar
+```
+
+**Servidor nuevo:**
+1. Crea el VPS con Ubuntu 24.04 y tu llave SSH.
+2. Como root, crea `luis` con contraseña y sudo, y copia la llave a `~luis/.ssh/authorized_keys`.
+3. Cambia la IP en `inventory.yml` y corre `run.ps1`.
+4. Crea `.env` y `traefik/users`, actualiza los secrets `VPS_HOST` y `VPS_KNOWN_HOSTS` en GitHub y relanza el deploy.
+5. Restaura con `restore.sh prod latest --yes`.
+
+**Prueba de idempotencia (local):** `bash deploy/ansible/test/run.sh` levanta un Ubuntu 24.04 con systemd en Docker,
+aplica el playbook dos veces y falla si la segunda corrida cambia algo. CI corre `ansible-lint` en cada PR.
+
 ## Primera instalación (una sola vez)
 
 ```bash

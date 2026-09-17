@@ -224,12 +224,21 @@ age + supercronic). Corre diario a las 03:30 America/Mexico_City: `pg_dump` y ta
 R2: bucket `puzzlelove-backups` con token limitado a ese bucket. Llave privada de age en `%USERPROFILE%\.age\puzzlelove-backup.key`
 en la PC del usuario (y en su gestor de contraseñas).
 
-**Monitoreo (escrito y probado en local):** servicio `uptime-kuma` (2.5.5-slim-rootless, SQLite vía `UPTIME_KUMA_DB_TYPE`)
+**Monitoreo (en producción desde 2026-09-17):** servicio `uptime-kuma` (2.5.5-slim-rootless, SQLite vía `UPTIME_KUMA_DB_TYPE`)
 en `status.$DOMAIN`. El admin está detrás de `dashboard-auth`; las rutas `/status/`, `/api/status-page/` y `/assets/` son públicas.
 Está en las redes proxy, internal y socket para chequear la app, Postgres, Garage y los contenedores. El backup le avisa por `BACKUP_PING_URL`
 (push interno). Alertas a Discord; UptimeRobot externo cubre la caída total del VPS. Monitores listados en `docs/runbook.md`.
 
-**Pendiente:** registro DNS `status`, deploy del monitoreo, configurar Kuma y UptimeRobot, y Ansible.
+Configurado por el usuario: admin de Kuma, webhook de Discord, monitores (app, sitio público, Postgres, push del backup y otros),
+página pública `https://status.luisjgl.cloud/status/puzzlelove` y UptimeRobot externo. `BACKUP_PING_URL` está en el `.env` del VPS.
+
+**Ansible (escrito y probado en local):** `deploy/ansible/` con los roles base, users, ssh, firewall, fail2ban, swap, docker y app.
+Toolchain fijo en Docker (`ansible==14.4.0`, `ansible-lint==26.8.0`); `run.ps1` monta `~/.ssh` y fija `ANSIBLE_CONFIG`, porque
+Ansible ignora `ansible.cfg` en directorios de Windows montados (world-writable). `test/run.sh` usa un contenedor systemd privilegiado,
+aplica dos corridas y exige `changed=0`; la swap se salta con `swap_enabled: false`. CI corre `ansible-lint` (perfil production).
+rsync del deploy excluye `ansible/`.
+
+**Pendiente:** correr `run.ps1 --check --diff` contra el VPS real y aplicar. Después, la plataforma de datos (sección 8).
 
 ## 10. Reglas para el agente
 
