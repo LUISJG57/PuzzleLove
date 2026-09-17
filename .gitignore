@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+server/data/
+server/.pgdata/
+*.log
+.DS_Store
+deploy/traefik/users
+deploy/.deployed-images
+.codegraph/
