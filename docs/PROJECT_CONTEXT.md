@@ -225,7 +225,13 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
    - Verificado en local: dashboard anónimo sin errores ni requests fallidos; SQL Lab, bases, queries y roles dan 302/401 a anónimos; el rol lector no puede leer `analytics_events`.
 6. **Infra:** Dockerfiles, `deploy/docker-compose.prod.yml`, Traefik, playbook de Ansible, GitHub Actions,
    backups `pg_dump` y Garage a R2, monitoreo.
-7. **Documento de arquitectura** con diagrama, decisiones (ADRs) y runbook.
+7. **Documentación: HECHO (2026-09-17), en inglés.**
+   - `README.md` como portada: links en vivo, qué demuestra, diagrama Mermaid, layout, cómo correr y tests.
+   - `docs/architecture.md`: contexto, contenedores y redes, juego, plataforma de datos con modelo de eventos, capas, estrella y checks,
+     delivery, seguridad, operación y limitaciones, con diagramas Mermaid.
+   - `docs/adr/0001–0012`: una decisión por archivo (contexto, decisión, alternativas y consecuencias).
+   - `docs/journey.md`: proceso por fases, **24 incidentes** con causa raíz, arreglo y lección (incluye los causados por el agente) y lecciones aprendidas.
+   Al agregar incidentes o decisiones, mantener la numeración y los links cruzados (ADR-0010 apunta al incidente 23).
 
 Todo se prueba localmente con Docker antes del VPS.
 
