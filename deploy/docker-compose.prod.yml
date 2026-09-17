@@ -1,0 +1,171 @@
+# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3).
+#
+# On the VPS (from this directory):
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+# Locally (Docker Desktop, self-signed TLS on puzzlelove.localhost):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --env-file .env up -d --build
+#
+# Only Traefik publishes ports (80/443). Docker bypasses UFW, so nothing else may use `ports:`.
+name: puzzlelove
+
+services:
+  # Read-only, filtered access to the Docker API so Traefik never mounts docker.sock itself.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [socket]
+    deploy:
+      resources:
+        limits: { memory: 64M }
+
+  traefik:
+    image: traefik:v3.7
+    restart: unless-stopped
+    depends_on: [socket-proxy]
+    command:
+      - --global.sendAnonymousUsage=false
+      - --api.dashboard=true
+      - --ping=true
+      - --log.level=INFO
+      - --accesslog=true
+      - --accesslog.format=json
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=puzzlelove_proxy
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls.certresolver=le
+      - --entrypoints.websecure.http.middlewares=secure-headers@file
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?set ACME_EMAIL}
+      - --certificatesresolvers.le.acme.caserver=${ACME_CA_SERVER:-https://acme-staging-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./traefik/users:/etc/traefik/users:ro
+      - letsencrypt:/letsencrypt
+    networks: [proxy, socket]
+    healthcheck:
+      test: ['CMD', 'traefik', 'healthcheck', '--ping']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.dashboard.rule: Host(`traefik.${DOMAIN:?set DOMAIN}`)
+      traefik.http.routers.dashboard.entrypoints: websecure
+      traefik.http.routers.dashboard.service: api@internal
+      traefik.http.routers.dashboard.middlewares: dashboard-auth@file
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: puzzlelove
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: puzzlelove
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U puzzlelove -d puzzlelove']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    shm_size: 128m
+    deploy:
+      resources:
+        limits: { memory: 1G }
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    # --single-node lays out a one-node cluster; --default-bucket creates the key and bucket from the env vars.
+    command: ['/garage', 'server', '--single-node', '--default-bucket']
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+      GARAGE_DEFAULT_BUCKET: puzzlelove
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    networks: [internal]
+    healthcheck:
+      test: ['CMD', '/garage', 'status']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
+  migrate:
+    image: ${MIGRATE_IMAGE:-puzzlelove-migrate:local}
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgresql://puzzlelove:${POSTGRES_PASSWORD}@postgres:5432/puzzlelove
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+
+  app:
+    image: ${APP_IMAGE:-puzzlelove:local}
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      garage: { condition: service_healthy }
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://puzzlelove:${POSTGRES_PASSWORD}@postgres:5432/puzzlelove
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://garage:3900
+      S3_REGION: garage
+      S3_BUCKET: puzzlelove
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: 'true'
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      TRUST_PROXY: 1
+    networks: [proxy, internal]
+    # The server saves every room on SIGTERM before exiting.
+    stop_grace_period: 30s
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.app.rule: Host(`${DOMAIN}`)
+      traefik.http.routers.app.entrypoints: websecure
+      traefik.http.routers.app.middlewares: ratelimit@file
+      traefik.http.services.app.loadbalancer.server.port: 3001
+    deploy:
+      resources:
+        limits: { memory: 400M }
+
+networks:
+  proxy:
+  socket:
+    internal: true
+  internal:
+    internal: true
+
+volumes:
+  letsencrypt:
+  pgdata:
+  garage-meta:
+  garage-data:

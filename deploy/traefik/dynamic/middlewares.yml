@@ -1,0 +1,27 @@
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: camera=(), microphone=(), geolocation=()
+
+    # Generous on purpose: Socket.IO long-polling fallback makes many small requests.
+    ratelimit:
+      rateLimit:
+        average: 100
+        period: 1s
+        burst: 200
+
+    # File created on the server, never committed (see deploy/.env.example).
+    dashboard-auth:
+      basicAuth:
+        usersFile: /etc/traefik/users
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12

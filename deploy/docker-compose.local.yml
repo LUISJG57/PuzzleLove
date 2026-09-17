@@ -1,0 +1,31 @@
+# Local override for Docker Desktop: builds the images and serves https://puzzlelove.localhost
+# with Traefik's self-signed default certificate (no Let's Encrypt).
+services:
+  traefik:
+    command: !override
+      - --global.sendAnonymousUsage=false
+      - --api.dashboard=true
+      - --ping=true
+      - --log.level=INFO
+      - --accesslog=true
+      - --accesslog.format=json
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=puzzlelove_proxy
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.middlewares=secure-headers@file
+
+  migrate:
+    build:
+      context: ..
+      target: migrate
+
+  app:
+    build:
+      context: ..
+      target: runtime
