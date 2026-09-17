@@ -145,10 +145,12 @@ El lake no entra al backup diario porque se puede regenerar con `--full-refresh`
   Un cambio hecho a mano en la interfaz sobre esos objetos se sobrescribe en el siguiente deploy: para conservarlo, pásalo al código.
 
 ```bash
-dc run --rm superset-init          # volver a aplicar roles, admin y dashboards sin redeploy
+./deploy.sh                        # vuelve a aplicar la release: corre superset-init (roles, admin, dashboards)
 dc logs --tail 40 superset
 dc exec redis redis-cli flushall   # limpiar la caché (por ejemplo, después de un --full-refresh del pipeline)
 ```
+`dc run` y `dc up` fuera de `deploy.sh` no saben qué imágenes usar (las elige `deploy.sh` a partir de `.deployed-release`); para servicios
+de un solo uso como `superset-init` o `migrate`, usa `./deploy.sh`. `dc exec`, `dc logs` y `dc ps` sí funcionan directo.
 
 ## Backups
 
