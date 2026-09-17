@@ -1,4 +1,4 @@
-# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3).
+# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2.
 #
 # On the VPS (from this directory):
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -157,12 +157,53 @@ services:
       resources:
         limits: { memory: 400M }
 
+  # Daily encrypted backups of Postgres and Garage to Cloudflare R2 (see backup/backup.sh and docs/runbook.md).
+  backup:
+    image: ${BACKUP_IMAGE:-puzzlelove-backup:local}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGUSER: puzzlelove
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: puzzlelove
+      AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      RETENTION_DAYS: 30
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ENDPOINT: ${R2_ENDPOINT:-}
+      RCLONE_CONFIG_R2_REGION: ${R2_REGION:-auto}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      # The R2 token is scoped to one bucket, so it cannot list or create buckets.
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: 'true'
+      RCLONE_CONFIG_GARAGE_TYPE: s3
+      RCLONE_CONFIG_GARAGE_PROVIDER: Other
+      RCLONE_CONFIG_GARAGE_ENDPOINT: http://garage:3900
+      RCLONE_CONFIG_GARAGE_REGION: garage
+      RCLONE_CONFIG_GARAGE_FORCE_PATH_STYLE: 'true'
+      RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+    # internal reaches postgres/garage; egress reaches R2.
+    networks: [internal, egress]
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
 networks:
   proxy:
   socket:
     internal: true
   internal:
     internal: true
+  egress:
 
 volumes:
   letsencrypt:

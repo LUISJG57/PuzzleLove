@@ -25,6 +25,7 @@ jobs:
     outputs:
       app: ${{ steps.refs.outputs.app }}
       migrate: ${{ steps.refs.outputs.migrate }}
+      backup: ${{ steps.refs.outputs.backup }}
     steps:
       - uses: actions/checkout@v7
 
@@ -38,6 +39,8 @@ jobs:
             echo "migrate=ghcr.io/$owner/puzzlelove-migrate:$tag"
             echo "app_latest=ghcr.io/$owner/puzzlelove:latest"
             echo "migrate_latest=ghcr.io/$owner/puzzlelove-migrate:latest"
+            echo "backup=ghcr.io/$owner/puzzlelove-backup:$tag"
+            echo "backup_latest=ghcr.io/$owner/puzzlelove-backup:latest"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
@@ -71,6 +74,17 @@ jobs:
             ${{ steps.refs.outputs.migrate_latest }}
           cache-from: type=gha
 
+      - name: Build and push backup image
+        uses: docker/build-push-action@v7
+        with:
+          context: deploy/backup
+          push: true
+          tags: |
+            ${{ steps.refs.outputs.backup }}
+            ${{ steps.refs.outputs.backup_latest }}
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,scope=backup,mode=max
+
   deploy:
     needs: images
     runs-on: ubuntu-latest
@@ -102,4 +116,5 @@ jobs:
           TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
           APP_IMAGE: ${{ needs.images.outputs.app }}
           MIGRATE_IMAGE: ${{ needs.images.outputs.migrate }}
-        run: ssh -i ~/.ssh/id_deploy "$TARGET" "bash /opt/puzzlelove/deploy.sh '$APP_IMAGE' '$MIGRATE_IMAGE'"
+          BACKUP_IMAGE: ${{ needs.images.outputs.backup }}
+        run: ssh -i ~/.ssh/id_deploy "$TARGET" "bash /opt/puzzlelove/deploy.sh '$APP_IMAGE' '$MIGRATE_IMAGE' '$BACKUP_IMAGE'"

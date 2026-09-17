@@ -29,3 +29,7 @@ services:
     build:
       context: ..
       target: runtime
+
+  backup:
+    build:
+      context: backup

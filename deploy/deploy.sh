@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Deploys a PuzzleLove release on the VPS. Run from the deploy directory (/opt/puzzlelove):
-#   ./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234
+#   ./deploy.sh ghcr.io/<owner>/puzzlelove:sha-abc1234 ghcr.io/<owner>/puzzlelove-migrate:sha-abc1234 \n#               ghcr.io/<owner>/puzzlelove-backup:sha-abc1234
 # On failure it redeploys the previous release and exits non-zero.
 # Migrations are not rolled back: they must stay backward compatible with the previous release.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <app-image> <migrate-image>" >&2
+if [[ $# -ne 3 ]]; then
+  echo "usage: $0 <app-image> <migrate-image> <backup-image>" >&2
   exit 2
 fi
 
@@ -34,17 +34,17 @@ health_check() {
 }
 
 release() {
-  export APP_IMAGE=$1 MIGRATE_IMAGE=$2
+  export APP_IMAGE=$1 MIGRATE_IMAGE=$2 BACKUP_IMAGE=$3
   echo "==> deploying $APP_IMAGE"
-  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate; fi
+  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup; fi
   compose up -d --remove-orphans --wait --wait-timeout 180 && health_check
 }
 
 previous=()
 if [[ -f $STATE_FILE ]]; then read -r -a previous < "$STATE_FILE"; fi
 
-if release "$1" "$2"; then
-  echo "$1 $2" > "$STATE_FILE"
+if release "$1" "$2" "$3"; then
+  echo "$1 $2 $3" > "$STATE_FILE"
   docker image prune -f >/dev/null
   echo "==> deployed $1"
   exit 0
@@ -52,9 +52,10 @@ fi
 
 echo "==> deploy of $1 failed" >&2
 compose logs --tail 50 app migrate >&2 || true
-if [[ ${#previous[@]} -eq 2 ]]; then
+if [[ ${#previous[@]} -ge 2 ]]; then
   echo "==> rolling back to ${previous[0]}" >&2
-  if release "${previous[0]}" "${previous[1]}"; then
+  # Releases recorded before backups existed have no backup image; keep the new one.
+  if release "${previous[0]}" "${previous[1]}" "${previous[2]:-$3}"; then
     echo "==> rollback succeeded" >&2
   else
     echo "==> ROLLBACK FAILED, manual intervention needed" >&2

@@ -1,0 +1,2 @@
+# Daily at 03:30 America/Mexico_City (TZ is set in the image).
+30 3 * * * /usr/local/bin/backup.sh run
