@@ -1,0 +1,19 @@
+---
+# Settings shared by every PuzzleLove server. Secrets are never stored here:
+# the app's .env and traefik/users are created by hand on the server (see docs/runbook.md).
+
+deploy_user: luis
+
+# Public keys allowed to log in as deploy_user. Public keys are safe to commit.
+deploy_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFskEqI1MPo/oBp6hJRnvfhUtamo79n1JXgD4uwjHzOK cheta@Luis"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKZ6GFsff5NYasiPWVQctlC9U1pJyvYZs3xar2+kkOh+ github-actions"
+
+ssh_max_auth_tries: 3
+
+swap_size_mb: 4096
+swap_swappiness: 10
+
+firewall_allowed_tcp_ports: [80, 443]
+
+app_dir: /opt/puzzlelove

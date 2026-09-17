@@ -1,0 +1,16 @@
+---
+- name: Create deploy user with sudo
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    groups: [sudo]
+    append: true
+    shell: /bin/bash
+
+- name: Authorize SSH keys for deploy user
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ deploy_authorized_keys }}"
+  loop_control:
+    label: "{{ item.split()[-1] }}"

@@ -1,0 +1,30 @@
+---
+# Docker publishes ports around UFW; only Traefik may publish (80/443). The Hostinger panel firewall is a second layer.
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Rate-limit SSH (allowed before enabling the firewall)
+  community.general.ufw:
+    rule: limit
+    name: OpenSSH
+
+- name: Allow web ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ firewall_allowed_tcp_ports }}"
+
+- name: Deny incoming, allow outgoing by default
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    default: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled

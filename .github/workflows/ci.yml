@@ -24,3 +24,16 @@ jobs:
         working-directory: server
       - run: npm run typecheck
       - run: npm test
+
+  ansible:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/ansible
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: pip install ansible==14.4.0 ansible-lint==26.8.0
+      - run: ansible-lint --offline site.yml

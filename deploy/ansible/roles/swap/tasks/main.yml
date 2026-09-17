@@ -1,0 +1,52 @@
+---
+# swap_enabled exists for the container-based test target, where swapon is not permitted.
+- name: Configure swap
+  when: swap_enabled | default(true)
+  block:
+    - name: Check swap file
+      ansible.builtin.stat:
+        path: /swapfile
+      register: swap_file_stat
+
+    - name: Create swap file
+      when: not swap_file_stat.stat.exists
+      block:
+        - name: Allocate swap file
+          ansible.builtin.command: fallocate -l {{ swap_size_mb }}M /swapfile
+          changed_when: true
+
+        - name: Restrict swap file permissions
+          ansible.builtin.file:
+            path: /swapfile
+            mode: "0600"
+
+        - name: Format swap file
+          ansible.builtin.command: mkswap /swapfile
+          changed_when: true
+
+    - name: Check active swap
+      ansible.builtin.command: swapon --show=NAME --noheadings
+      register: swap_active
+      changed_when: false
+      check_mode: false
+
+    - name: Activate swap file
+      ansible.builtin.command: swapon /swapfile
+      when: "'/swapfile' not in swap_active.stdout"
+      changed_when: true
+
+    # Exact lines (not the mount/sysctl modules) so an already configured server reports no change.
+    - name: Mount swap file at boot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^/swapfile\s'
+        line: /swapfile none swap sw 0 0
+
+    - name: Prefer RAM over swap
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-swap.conf
+        content: "vm.swappiness={{ swap_swappiness }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload sysctl

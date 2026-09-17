@@ -8,3 +8,4 @@ server/.pgdata/
 deploy/traefik/users
 deploy/.deployed-images
 .codegraph/
+deploy/ansible/test/.work/

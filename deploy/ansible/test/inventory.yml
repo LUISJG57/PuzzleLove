@@ -1,0 +1,10 @@
+---
+# Local test target (see test/run.sh). Uses a throwaway key and skips swap, which containers cannot enable.
+vps:
+  hosts:
+    puzzlelove-test:
+      ansible_host: target
+      ansible_user: luis
+      ansible_ssh_private_key_file: /ansible/test/.work/test_key
+      ansible_ssh_common_args: -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      swap_enabled: false

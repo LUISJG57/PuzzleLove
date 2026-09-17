@@ -108,7 +108,7 @@ jobs:
         run: |
           rsync -az --chmod=D755,F644 -e "ssh -i ~/.ssh/id_deploy" \
             --exclude .env --exclude .env.example --exclude traefik/users \
-            --exclude docker-compose.local.yml --exclude .deployed-images \
+            --exclude docker-compose.local.yml --exclude .deployed-images --exclude ansible \
             deploy/ "$TARGET:/opt/puzzlelove/"
 
       - name: Deploy release

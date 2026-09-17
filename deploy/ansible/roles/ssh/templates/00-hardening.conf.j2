@@ -1,0 +1,9 @@
+# Managed by Ansible (deploy/ansible/roles/ssh).
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AllowUsers {{ deploy_user }}
+MaxAuthTries {{ ssh_max_auth_tries }}
+LoginGraceTime 30
+X11Forwarding no

@@ -1,0 +1,26 @@
+---
+# GitHub Actions rsyncs deploy/ into app_dir; secrets are created by hand and never managed here.
+- name: Create app directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop:
+    - "{{ app_dir }}"
+    - "{{ app_dir }}/traefik"
+
+- name: Check secret files
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/{{ item }}"
+  loop: [.env, traefik/users]
+  register: app_secret_files
+
+- name: Remind about missing secret files
+  ansible.builtin.debug:
+    msg: "{{ app_dir }}/{{ item.item }} is missing; create it before the first deploy (docs/runbook.md)."
+  loop: "{{ app_secret_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists

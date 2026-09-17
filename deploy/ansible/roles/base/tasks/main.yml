@@ -1,0 +1,17 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, rsync, unattended-upgrades]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"

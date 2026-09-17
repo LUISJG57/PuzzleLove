@@ -1,0 +1,17 @@
+---
+# Guard against locking ourselves out: hardening only applies once the deploy user has a key.
+- name: Check that deploy user has authorized keys
+  ansible.builtin.assert:
+    that: deploy_authorized_keys | length > 0
+    fail_msg: deploy_authorized_keys is empty; refusing to disable password and root login.
+
+# The 00- prefix makes this file win over Hostinger's 50-cloud-init.conf (sshd keeps the first value it reads).
+- name: Harden OpenSSH
+  ansible.builtin.template:
+    src: 00-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh

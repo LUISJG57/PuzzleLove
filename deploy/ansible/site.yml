@@ -1,0 +1,15 @@
+---
+# Provisions a PuzzleLove server: hardened SSH, firewall, fail2ban, swap, Docker and the app directory.
+# Safe to re-run: every task is idempotent. See docs/runbook.md ("Aprovisionar con Ansible").
+- name: Provision PuzzleLove server
+  hosts: vps
+  become: true
+  roles:
+    - base
+    - users
+    - ssh
+    - firewall
+    - fail2ban
+    - swap
+    - docker
+    - app
