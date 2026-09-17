@@ -1,4 +1,4 @@
-# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2 + Uptime Kuma + analytics pipeline.
+# PuzzleLove production stack: Traefik + app + Postgres + Garage (S3) + backups to R2 + Uptime Kuma + analytics pipeline + Superset.
 #
 # On the VPS (from this directory):
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -196,6 +196,63 @@ services:
     deploy:
       resources:
         limits: { memory: 3G }
+
+  redis:
+    image: redis:8.8-alpine
+    restart: unless-stopped
+    # Cache only: no persistence, bounded memory.
+    command: ['redis-server', '--maxmemory', '96mb', '--maxmemory-policy', 'allkeys-lru', '--save', '', '--appendonly', 'no']
+    networks: [internal]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
+  # Creates the superset database, the read-only warehouse role, the admin user and the dashboards (idempotent).
+  superset-init:
+    image: ${SUPERSET_IMAGE:-puzzlelove-superset:local}
+    restart: 'no'
+    command: ['python', '/app/bootstrap/init.py']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment: &superset-env
+      PGHOST: postgres
+      PGDATABASE: puzzlelove
+      PGUSER: puzzlelove
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?set SUPERSET_SECRET_KEY}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:?set SUPERSET_DB_PASSWORD}
+      WAREHOUSE_READER_PASSWORD: ${WAREHOUSE_READER_PASSWORD:?set WAREHOUSE_READER_PASSWORD}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?set SUPERSET_ADMIN_PASSWORD}
+      SUPERSET_ADMIN_EMAIL: ${ACME_EMAIL}
+      REDIS_URL: redis://redis:6379
+    networks: [internal]
+
+  # Apache Superset at superset.$DOMAIN: public read-only dashboard, everything else behind the admin login.
+  superset:
+    image: ${SUPERSET_IMAGE:-puzzlelove-superset:local}
+    restart: unless-stopped
+    depends_on:
+      superset-init: { condition: service_completed_successfully }
+    environment:
+      <<: *superset-env
+      SERVER_WORKER_AMOUNT: 2
+      SERVER_THREADS_AMOUNT: 8
+    networks: [proxy, internal]
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.superset.rule: Host(`superset.${DOMAIN}`)
+      traefik.http.routers.superset.entrypoints: websecure
+      traefik.http.routers.superset.middlewares: ratelimit@file
+      traefik.http.services.superset.loadbalancer.server.port: 8088
+    deploy:
+      resources:
+        limits: { memory: 1200M }
 
   # Daily encrypted backups of Postgres and Garage to Cloudflare R2 (see backup/backup.sh and docs/runbook.md).
   backup:

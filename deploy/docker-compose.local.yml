@@ -38,3 +38,11 @@ services:
     build:
       context: ../analytics
       target: runtime
+
+  superset-init:
+    build:
+      context: superset
+
+  superset:
+    build:
+      context: superset

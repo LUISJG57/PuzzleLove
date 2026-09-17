@@ -44,6 +44,8 @@ jobs:
             echo "backup_latest=ghcr.io/$owner/puzzlelove-backup:latest"
             echo "pipeline=ghcr.io/$owner/puzzlelove-pipeline:$tag"
             echo "pipeline_latest=ghcr.io/$owner/puzzlelove-pipeline:latest"
+            echo "superset=ghcr.io/$owner/puzzlelove-superset:$tag"
+            echo "superset_latest=ghcr.io/$owner/puzzlelove-superset:latest"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
@@ -98,6 +100,17 @@ jobs:
             ${{ steps.refs.outputs.pipeline }}
             ${{ steps.refs.outputs.pipeline_latest }}
           cache-from: type=gha,scope=pipeline
+
+      - name: Build and push Superset image
+        uses: docker/build-push-action@v7
+        with:
+          context: deploy/superset
+          push: true
+          tags: |
+            ${{ steps.refs.outputs.superset }}
+            ${{ steps.refs.outputs.superset_latest }}
+          cache-from: type=gha,scope=superset
+          cache-to: type=gha,scope=superset,mode=max
 
   deploy:
     needs: images

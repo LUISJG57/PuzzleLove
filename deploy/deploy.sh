@@ -2,7 +2,7 @@
 # Deploys a PuzzleLove release on the VPS. Run from the deploy directory (/opt/puzzlelove):
 #   IMAGE_REPO=ghcr.io/<owner>/ ./deploy.sh sha-abc1234   # deploy that tag of every image
 #   ./deploy.sh                                            # re-apply the current release (e.g. after editing .env)
-# Images: <IMAGE_REPO>puzzlelove, -migrate, -backup and -pipeline, all with the same tag.
+# Images: <IMAGE_REPO>puzzlelove, -migrate, -backup, -pipeline and -superset, all with the same tag.
 # On failure it redeploys the previous release and exits non-zero.
 # Migrations are not rolled back: they must stay backward compatible with the previous release.
 set -euo pipefail
@@ -66,9 +66,9 @@ health_check() {
 release() {
   local r=$1 t=$2
   export APP_IMAGE="${r}puzzlelove:$t" MIGRATE_IMAGE="${r}puzzlelove-migrate:$t" \
-    BACKUP_IMAGE="${r}puzzlelove-backup:$t" PIPELINE_IMAGE="${r}puzzlelove-pipeline:$t"
+    BACKUP_IMAGE="${r}puzzlelove-backup:$t" PIPELINE_IMAGE="${r}puzzlelove-pipeline:$t"     SUPERSET_IMAGE="${r}puzzlelove-superset:$t"
   echo "==> deploying $APP_IMAGE"
-  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup pipeline; fi
+  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup pipeline superset-init; fi
   compose up -d --wait --wait-timeout 120 garage && bash garage/init-lake.sh
   compose up -d --remove-orphans --wait --wait-timeout 180 && health_check
 }
