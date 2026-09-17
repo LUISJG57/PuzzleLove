@@ -1,0 +1,45 @@
+# Local services for PuzzleLove: PostgreSQL + MinIO (S3-compatible image storage).
+# Usage: docker compose up -d
+# Then in server/.env use:
+#   DATABASE_URL=postgresql://puzzlelove:puzzlelove@localhost:5432/puzzlelove
+#   STORAGE_DRIVER=s3, S3_ENDPOINT=http://localhost:9000, S3_BUCKET=puzzlelove,
+#   S3_ACCESS_KEY_ID=puzzlelove, S3_SECRET_ACCESS_KEY=puzzlelove-secret, S3_FORCE_PATH_STYLE=true
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: puzzlelove
+      POSTGRES_PASSWORD: puzzlelove
+      POSTGRES_DB: puzzlelove
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: puzzlelove
+      MINIO_ROOT_PASSWORD: puzzlelove-secret
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - miniodata:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 puzzlelove puzzlelove-secret; do sleep 1; done;
+      mc mb --ignore-existing local/puzzlelove;
+      "
+
+volumes:
+  pgdata:
+  miniodata:

@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  isGlobal       Boolean  @default(false)
+  imageKey       String
+  imageWidth     Int
+  imageHeight    Int
+  rows           Int
+  cols           Int
+  seed           Int
+  /// PuzzleState JSON: groups, scores, startedAt, completedAt
+  state          Json
+  createdAt      DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+
+  @@index([isGlobal, lastActivityAt])
+}
+
+model GlobalQueueItem {
+  id          String    @id @default(cuid())
+  imageKey    String
+  imageWidth  Int
+  imageHeight Int
+  createdAt   DateTime  @default(now())
+  usedAt      DateTime?
+
+  @@index([usedAt, createdAt])
+}
