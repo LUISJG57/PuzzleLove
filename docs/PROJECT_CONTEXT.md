@@ -200,7 +200,16 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
    - `runs.py`: `warehouse.pipeline_runs` (status, watermark, row_counts, checks y error); las corridas colgadas quedan en failed.
    - Local con 600 mil eventos: full refresh en unos 100 s; incremental de 55 eventos en unos 99 s. 6 tests de pytest en Docker; CI job `pipeline`.
    - Garage: bucket `lake` con llave propia (`LAKE_ACCESS_KEY_ID`/`LAKE_SECRET_ACCESS_KEY`), que `deploy/garage/init-lake.sh` importa de forma idempotente.
-4. **Dashboard propio:** pestaña de analítica en `client/src/pages/AdminPage.tsx` con endpoint `/api/admin/analytics`.
+4. **Dashboard propio: HECHO (2026-09-17).**
+   - `/admin` tiene las pestañas "Juego" y "Analítica" (`client/src/pages/AnalyticsPanel.tsx`).
+   - Gráficas SVG propias en `client/src/components/charts.tsx`: LineChart con crosshair y tooltip, Heatmap con rampa azul secuencial, y BarList.
+   - Sigue la skill dataviz: serie `#2a78d6` validada contra blanco, hairlines, sin doble eje, tabla como alternativa y tooltips con teclado.
+   - `GET /api/admin/analytics?days=7|14|30|90&traffic=all|human|bot|synthetic` (solo admin) usa `server/src/analytics/warehouse.ts`
+     (`PrismaWarehouseReader`, SQL parametrizado sobre `warehouse.*`). Devuelve:
+     - KPIs con el periodo anterior.
+     - Serie diaria, heatmap día × hora, finalización por tamaño y última corrida del pipeline.
+   - El rango termina en el último día **completo** (hora de México), para no mostrar la caída falsa del día en curso.
+   - Si no hay warehouse responde `{available:false}`. Verificado con capturas en Edge (1280 px y 390 px): sin overflow ni errores de consola.
 5. **Superset** configurado con conexión al warehouse y dashboard exportado como código.
 6. **Infra:** Dockerfiles, `deploy/docker-compose.prod.yml`, Traefik, playbook de Ansible, GitHub Actions,
    backups `pg_dump` y Garage a R2, monitoreo.
