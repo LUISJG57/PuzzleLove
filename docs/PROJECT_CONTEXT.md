@@ -210,7 +210,19 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
      - Serie diaria, heatmap día × hora, finalización por tamaño y última corrida del pipeline.
    - El rango termina en el último día **completo** (hora de México), para no mostrar la caída falsa del día en curso.
    - Si no hay warehouse responde `{available:false}`. Verificado con capturas en Edge (1280 px y 390 px): sin overflow ni errores de consola.
-5. **Superset** configurado con conexión al warehouse y dashboard exportado como código.
+5. **Superset: HECHO (2026-09-17).** Apache Superset 6.1.0 en `superset.$DOMAIN`. Imagen `deploy/superset/` (driver psycopg2 + `superset_config.py` + bootstrap).
+   - **Redis** 8.8 solo como caché (96 MB LRU, sin persistencia): caches de datos, filtros, explore y rate limit.
+   - `superset-init` (un solo uso, idempotente, corre en cada deploy):
+     - Crea la base `superset` y el rol de Postgres **`warehouse_reader`**: SELECT solo en `warehouse`, con default privileges porque el pipeline recrea tablas, y sin acceso a `pipeline_runs`.
+     - Ejecuta `db upgrade`, crea el admin (usuario `admin`, contraseña desde `.env`) y corre `superset init`.
+     - Ejecuta `bootstrap/dashboards.py`.
+   - **Dashboards como código** (`dashboards.py`): conexión "PuzzleLove warehouse" con el rol lector, 4 datasets virtuales **solo de agregados** (sin nombres ni ids),
+     7 charts (3 big numbers, líneas de sesiones por tráfico, barras apiladas de puzzles por sala, heatmap `schemeBlues` y finalización por tamaño),
+     un filtro nativo "Tráfico" y el dashboard `/superset/dashboard/puzzlelove/` publicado con `DASHBOARD_RBAC` para el rol **Public**
+     (permisos mínimos más `datasource_access` a esos 4 datasets). Si el warehouse aún no existe, se salta y se crea en el siguiente deploy.
+   - Trucos del bootstrap: usa el test client de Flask en proceso, con CSRF apagado solo en esa instancia, y `login_user(admin)` en un `before_request`,
+     porque el JWT no llena el usuario de Flask-Login y la validación de acceso a tablas fallaba.
+   - Verificado en local: dashboard anónimo sin errores ni requests fallidos; SQL Lab, bases, queries y roles dan 302/401 a anónimos; el rol lector no puede leer `analytics_events`.
 6. **Infra:** Dockerfiles, `deploy/docker-compose.prod.yml`, Traefik, playbook de Ansible, GitHub Actions,
    backups `pg_dump` y Garage a R2, monitoreo.
 7. **Documento de arquitectura** con diagrama, decisiones (ADRs) y runbook.

@@ -134,6 +134,22 @@ dc exec postgres psql -U puzzlelove -c "select run_id, status, started_at, water
 Si falla una validación de severidad `error`, la corrida termina en `failed` y **no** publica en el warehouse, así que los dashboards conservan los datos anteriores.
 El lake no entra al backup diario porque se puede regenerar con `--full-refresh`; el schema `warehouse` sí va en el `pg_dump`.
 
+## Superset
+
+`https://superset.luisjgl.cloud`:
+- **Público:** el dashboard `/superset/dashboard/puzzlelove/` se ve sin login y solo con agregados.
+- **Todo lo demás** (SQL Lab, edición, otras bases) requiere entrar como `admin` con `SUPERSET_ADMIN_PASSWORD`.
+
+- Consulta el warehouse con el rol de Postgres `warehouse_reader`, que es de solo lectura, no ve las tablas del juego ni `pipeline_runs` y **no puede escribir**.
+- Los dashboards están definidos en `deploy/superset/bootstrap/dashboards.py` y se aplican en cada deploy (`superset-init`).
+  Un cambio hecho a mano en la interfaz sobre esos objetos se sobrescribe en el siguiente deploy: para conservarlo, pásalo al código.
+
+```bash
+dc run --rm superset-init          # volver a aplicar roles, admin y dashboards sin redeploy
+dc logs --tail 40 superset
+dc exec redis redis-cli flushall   # limpiar la caché (por ejemplo, después de un --full-refresh del pipeline)
+```
+
 ## Backups
 
 El servicio `backup` corre todos los días a las **03:30 (America/Mexico_City)**:
@@ -191,7 +207,8 @@ Como Kuma corre en el mismo VPS, no puede avisar si se cae la máquina entera. P
 **Bots en vivo:** el servicio `bots` juega la sala global con nombres `🤖 …` (`client_id` `bot-…`). La cantidad sigue la curva
 horaria de México hasta `BOTS_MAX` (default 2). Para apagarlos, pon `BOTS_MAX=0` en `.env` y corre `./deploy.sh`.
 
-**Backfill (solo en local):** genera semanas de historia en `analytics_events` con `is_synthetic = true`:
+**Backfill:** genera semanas de historia en `analytics_events` con `is_synthetic = true`. Se usa en local, y en producción solo como
+demostración mientras no hay tráfico real. Siempre va marcado y filtrable, y se quita con `--purge` seguido de `pipeline run --full-refresh`:
 ```bash
 cd deploy
 PW=$(grep ^POSTGRES_PASSWORD .env | cut -d= -f2)
