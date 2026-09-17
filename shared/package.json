@@ -1,0 +1,15 @@
+{
+  "name": "@puzzlelove/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.1"
+  }
+}
