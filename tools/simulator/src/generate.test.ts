@@ -30,6 +30,12 @@ describe('generateHistory', () => {
     expect(generateHistory({ start, end, seed: 8 })[0].eventId).not.toBe(events[0].eventId);
   });
 
+  it('never reuses event ids when the same seed runs over a shifted window', () => {
+    const shifted = generateHistory({ start: new Date(start.getTime() + 5 * 60_000), end: new Date(end.getTime() + 5 * 60_000), seed: 7 });
+    const ids = new Set(events.map((e) => e.eventId));
+    expect(shifted.some((e) => ids.has(e.eventId))).toBe(false);
+  });
+
   it('keeps sessions consistent: join first, leave last, grabs resolved', () => {
     const bySession = new Map<string, SimEvent[]>();
     for (const e of events) if (e.sessionId) bySession.set(e.sessionId, [...(bySession.get(e.sessionId) ?? []), e]);

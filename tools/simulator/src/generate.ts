@@ -86,6 +86,8 @@ interface RoomSim {
  */
 export function generateHistory(opts: GenerateOptions): SimEvent[] {
   const rng = createRng(opts.seed);
+  // Identifiers also depend on the window, so re-running with the same seed later never reuses ids for different events.
+  const idRng = createRng((opts.seed ^ Math.floor(opts.start.getTime() / 60_000)) >>> 0);
   const population = syntheticPopulation(opts.populationSize ?? 150, opts.seed ^ 0x5eed);
   const start = opts.start.getTime();
   const end = opts.end.getTime();
@@ -93,7 +95,7 @@ export function generateHistory(opts: GenerateOptions): SimEvent[] {
 
   const emit = (room: RoomSim, type: string, at: number, session: Session | null, payload: Record<string, unknown>) => {
     events.push({
-      eventId: uuid(rng),
+      eventId: uuid(idRng),
       eventType: type,
       schemaVersion: 1,
       occurredAt: new Date(at),
@@ -240,7 +242,7 @@ export function generateHistory(opts: GenerateOptions): SimEvent[] {
       const persona = pickPersona(new Set());
       const joinAt = hour + Math.floor(rng() * HOUR);
       globalSessions.push({
-        id: `sim-${uuid(rng)}`,
+        id: `sim-${uuid(idRng)}`,
         persona,
         joinAt,
         leaveAt: joinAt + Math.floor(timing.sessionMs(rng, persona.sessionMinutes)),
@@ -288,7 +290,7 @@ export function generateHistory(opts: GenerateOptions): SimEvent[] {
       const { rows, cols } = gridForPieceCount(pieces, imageWidth, imageHeight);
       const meta: PuzzleMeta = { rows, cols, seed: 0, imageWidth, imageHeight };
       const room: RoomSim = {
-        slug: randomSlug(rng),
+        slug: randomSlug(idRng),
         type: 'private',
         meta,
         layout: computeLayout(meta),
@@ -312,7 +314,7 @@ export function generateHistory(opts: GenerateOptions): SimEvent[] {
         taken.add(persona.clientId);
         const joinAt = createdAt + (g === 0 ? 5_000 + Math.floor(rng() * 40_000) : Math.floor(rng() * 12 * 60_000));
         sessions.push({
-          id: `sim-${uuid(rng)}`,
+          id: `sim-${uuid(idRng)}`,
           persona,
           joinAt,
           leaveAt: joinAt + Math.floor(timing.sessionMs(rng, persona.sessionMinutes * 2 * minutesFactor)),
