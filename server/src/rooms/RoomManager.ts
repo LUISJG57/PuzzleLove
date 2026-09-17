@@ -28,12 +28,15 @@ import {
   type RoomSnapshot,
   type ServerToClientEvents,
 } from '@puzzlelove/shared';
+import type { EventContext, PuzzleSource } from '../analytics/events';
+import { NoopEventSink, type EventSink } from '../analytics/sink';
 import type { QueueItem, Repo, RoomRecord } from '../db/repo';
 import { randomId, type ProcessedImage, createDefaultGlobalImage } from '../images';
 import type { ImageStorage } from '../storage';
 
 export interface SocketData {
   slug?: string;
+  joinedAt?: number;
 }
 
 export type IoServer = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
@@ -48,11 +51,15 @@ export interface RoomManagerOptions {
   unloadAfterMs?: number;
   expiryCheckMs?: number;
   maxCursorsBroadcast?: number;
+  /** Gameplay analytics; defaults to discarding events. */
+  events?: EventSink;
 }
 
 interface Lock {
   by: string;
+  /** Last grab or move; drives the lock timeout. */
   at: number;
+  grabbedAt: number;
 }
 
 class LiveRoom {
@@ -88,6 +95,11 @@ class LiveRoom {
 
   get state() {
     return this.record.state;
+  }
+
+  /** One play-through of the room's current puzzle. */
+  get puzzleId() {
+    return `${this.record.slug}:${this.record.seed}`;
   }
 }
 
@@ -128,8 +140,37 @@ export class RoomManager {
       unloadAfterMs: 2 * 60_000,
       expiryCheckMs: 60 * 60_000,
       maxCursorsBroadcast: 60,
+      events: new NoopEventSink(),
       ...options,
     };
+  }
+
+  private get events() {
+    return this.opts.events;
+  }
+
+  /** Analytics context for a room, optionally scoped to one connected player. */
+  private ctx(room: LiveRoom, socketId?: string): EventContext {
+    return {
+      sessionId: socketId,
+      clientId: socketId ? room.players.get(socketId)?.clientId : undefined,
+      roomSlug: room.slug,
+      roomType: room.record.isGlobal ? 'global' : 'private',
+      puzzleId: room.puzzleId,
+    };
+  }
+
+  private trackPuzzleStarted(room: LiveRoom, source: PuzzleSource) {
+    const { rows, cols } = room.meta;
+    this.events.track('puzzle_started', this.ctx(room), { rows, cols, pieces: rows * cols, source });
+  }
+
+  private trackAbandoned(room: LiveRoom, groupId: number, lock: Lock, reason: 'left' | 'regrab' | 'timeout') {
+    this.events.track('piece_abandoned', this.ctx(room, lock.by), {
+      group_id: groupId,
+      hold_ms: Date.now() - lock.grabbedAt,
+      reason,
+    });
   }
 
   async init() {
@@ -184,7 +225,9 @@ export class RoomManager {
       seed: meta.seed,
       state: createInitialState(meta, computeLayout(meta)),
     });
-    return (await this.getLive(GLOBAL_ROOM))!;
+    const room = (await this.getLive(GLOBAL_ROOM))!;
+    this.trackPuzzleStarted(room, item ? 'queue' : 'default');
+    return room;
   }
 
   private async getLive(slug: string): Promise<LiveRoom | null> {
@@ -247,14 +290,18 @@ export class RoomManager {
   async join(socket: IoSocket, req: JoinRequest): Promise<JoinResult> {
     if (!req || typeof req.room !== 'string' || typeof req.name !== 'string') return { ok: false, error: 'invalid' };
     const slug = req.room;
-    if (!SLUG_PATTERN.test(slug)) return { ok: false, error: 'not_found' };
+    const fail = (error: 'not_found' | 'full'): JoinResult => {
+      this.events.track('join_failed', { sessionId: socket.id, roomSlug: slug.slice(0, 40) }, { error });
+      return { ok: false, error };
+    };
+    if (!SLUG_PATTERN.test(slug)) return fail('not_found');
 
-    this.leave(socket);
+    this.leave(socket, 'switch');
     const room = await this.getLive(slug);
-    if (!room) return { ok: false, error: 'not_found' };
+    if (!room) return fail('not_found');
     if (!socket.connected) return { ok: false, error: 'invalid' };
-    if (socket.data.slug) this.leave(socket); // joined something else while loading
-    if (!room.record.isGlobal && room.players.size >= PRIVATE_MAX_PLAYERS) return { ok: false, error: 'full' };
+    if (socket.data.slug) this.leave(socket, 'switch'); // joined something else while loading
+    if (!room.record.isGlobal && room.players.size >= PRIVATE_MAX_PLAYERS) return fail('full');
 
     const name = req.name.trim().slice(0, MAX_NAME_LENGTH) || 'Player';
     const color = (PLAYER_COLORS as readonly string[]).includes(req.color)
@@ -266,29 +313,38 @@ export class RoomManager {
     room.players.set(socket.id, player);
     room.emptySince = null;
     socket.data.slug = slug;
+    socket.data.joinedAt = Date.now();
     await socket.join(slug);
     socket.to(slug).emit('player:joined', player);
     this.touch(room);
+    this.events.track('player_joined', this.ctx(room, socket.id), { name, color, players_in_room: room.players.size });
     return { ok: true, snapshot: this.snapshot(room) };
   }
 
-  leave(socket: IoSocket) {
+  leave(socket: IoSocket, reason: 'disconnect' | 'switch' = 'disconnect') {
     const room = this.roomOf(socket);
     socket.data.slug = undefined;
     if (!room) return;
+    this.releaseLocksOf(room, socket.id, 'left');
+    const ctx = this.ctx(room, socket.id);
     room.players.delete(socket.id);
-    this.releaseLocksOf(room, socket.id);
+    this.events.track('player_left', ctx, {
+      reason,
+      duration_ms: Date.now() - (socket.data.joinedAt ?? Date.now()),
+      players_in_room: room.players.size,
+    });
     if (room.cursors.delete(socket.id)) room.cursorsDirty = true;
     void socket.leave(room.slug);
     this.io.to(room.slug).emit('player:left', socket.id);
     if (room.players.size === 0) room.emptySince = Date.now();
   }
 
-  private releaseLocksOf(room: LiveRoom, playerId: string) {
+  private releaseLocksOf(room: LiveRoom, playerId: string, reason: 'left' | 'regrab') {
     for (const [groupId, lock] of room.locks) {
       if (lock.by !== playerId) continue;
       room.locks.delete(groupId);
       room.pendingMoves.delete(groupId);
+      this.trackAbandoned(room, groupId, lock, reason);
       const g = findGroup(room.state, groupId);
       if (g) this.io.to(room.slug).emit('group:unlocked', { groupId, x: g.x, y: g.y });
     }
@@ -299,10 +355,20 @@ export class RoomManager {
     if (!room || room.state.completedAt || !Number.isInteger(groupId)) return false;
     if (!findGroup(room.state, groupId)) return false;
     const lock = room.locks.get(groupId);
-    if (lock && lock.by !== socket.id) return false;
-    if (!lock) this.releaseLocksOf(room, socket.id);
-    room.locks.set(groupId, { by: socket.id, at: Date.now() });
+    const now = Date.now();
+    if (lock && lock.by !== socket.id) {
+      this.events.track('grab_conflict', this.ctx(room, socket.id), { group_id: groupId, held_ms: now - lock.grabbedAt });
+      return false;
+    }
+    if (!lock) this.releaseLocksOf(room, socket.id, 'regrab');
+    room.locks.set(groupId, { by: socket.id, at: now, grabbedAt: lock?.grabbedAt ?? now });
     socket.to(room.slug).emit('group:locked', { groupId, by: socket.id });
+    if (!lock) {
+      this.events.track('piece_grabbed', this.ctx(room, socket.id), {
+        group_id: groupId,
+        group_size: findGroup(room.state, groupId)!.pieces.length,
+      });
+    }
     if (room.state.startedAt === null) room.state.startedAt = Date.now();
     this.touch(room);
     return true;
@@ -332,8 +398,17 @@ export class RoomManager {
     const g = findGroup(room.state, data.g);
     if (!g) return;
 
+    const groupSize = g.pieces.length;
     const result = releaseGroup(room.state, room.meta, room.layout, data.g, data.x, data.y, (id) => room.locks.has(id));
     this.touch(room);
+    this.events.track('piece_dropped', this.ctx(room, socket.id), {
+      group_id: data.g,
+      hold_ms: Date.now() - lock.grabbedAt,
+      snapped: !!result,
+      frame: result?.frame ?? false,
+      merged_groups: result?.removed.length ?? 0,
+      group_size: result ? result.pieces.length : groupSize,
+    });
     if (!result) {
       this.io.to(room.slug).emit('group:unlocked', { groupId: g.id, x: g.x, y: g.y });
       return;
@@ -362,10 +437,17 @@ export class RoomManager {
     room.locks.clear();
     room.pendingMoves.clear();
     room.nextPuzzleAt = room.record.isGlobal ? now + this.opts.globalNextDelayMs : null;
+    const scores = Object.values(state.scores).sort((a, b) => b.count - a.count);
     this.io.to(room.slug).emit('puzzle:completed', {
       durationMs: now - (state.startedAt ?? now),
-      scores: Object.values(state.scores).sort((a, b) => b.count - a.count),
+      scores,
       nextPuzzleAt: room.nextPuzzleAt,
+    });
+    this.events.track('puzzle_completed', this.ctx(room), {
+      duration_ms: now - (state.startedAt ?? now),
+      pieces: room.meta.rows * room.meta.cols,
+      players_in_room: room.players.size,
+      contributors: scores.map((s) => ({ client_id: s.clientId, name: s.name, count: s.count })),
     });
     if (room.record.isGlobal) this.scheduleGlobalRotation(room);
     void this.save(room);
@@ -383,12 +465,12 @@ export class RoomManager {
   async restart(socket: IoSocket) {
     const room = this.roomOf(socket);
     if (!room || room.record.isGlobal || !room.state.completedAt) return;
-    await this.startNewPuzzle(room);
+    await this.startNewPuzzle(room, 'restart');
   }
 
   // ---------------------------------------------------------------- puzzle lifecycle
 
-  private async startNewPuzzle(room: LiveRoom, image?: QueueItem) {
+  private async startNewPuzzle(room: LiveRoom, source: PuzzleSource, image?: QueueItem) {
     if (room.rotateTimer) clearTimeout(room.rotateTimer);
     room.rotateTimer = null;
     const rec = room.record;
@@ -408,6 +490,7 @@ export class RoomManager {
     room.pendingMoves.clear();
     room.nextPuzzleAt = null;
     this.touch(room);
+    this.trackPuzzleStarted(room, source);
     this.io.to(room.slug).emit('room:snapshot', this.snapshot(room));
     await this.repo.updateRoom(rec.slug, {
       imageKey: rec.imageKey,
@@ -427,15 +510,17 @@ export class RoomManager {
     const at = room.nextPuzzleAt ?? Date.now() + this.opts.globalNextDelayMs;
     room.nextPuzzleAt = at;
     room.rotateTimer = setTimeout(() => {
-      void this.rotateGlobal().catch((err) => console.error('[rooms] global rotation failed', err));
+      void this.rotateGlobal('auto').catch((err) => console.error('[rooms] global rotation failed', err));
     }, Math.max(0, at - Date.now()));
   }
 
   /** Starts the next global puzzle: next queued image, or the same image reshuffled. */
-  async rotateGlobal() {
+  async rotateGlobal(trigger: 'auto' | 'admin' = 'admin') {
     const room = await this.ensureGlobal();
     const item = await this.repo.takeNextFromQueue();
-    await this.startNewPuzzle(room, item ?? undefined);
+    const source = item ? 'queue' : 'reshuffle';
+    this.events.track('global_rotated', this.ctx(room), { trigger, source });
+    await this.startNewPuzzle(room, source, item ?? undefined);
   }
 
   async globalStatus() {
@@ -470,6 +555,15 @@ export class RoomManager {
         seed: meta.seed,
         state: createInitialState(meta, computeLayout(meta)),
       });
+      const ctx: EventContext = { roomSlug: slug, roomType: 'private', puzzleId: `${slug}:${meta.seed}` };
+      this.events.track('room_created', ctx, {
+        pieces_requested: pieceCount,
+        rows,
+        cols,
+        image_width: image.width,
+        image_height: image.height,
+      });
+      this.events.track('puzzle_started', ctx, { rows, cols, pieces: rows * cols, source: 'create' });
     } catch (err) {
       await this.storage.delete(imageKey).catch(() => {});
       throw err;
@@ -513,6 +607,7 @@ export class RoomManager {
       for (const [groupId, lock] of room.locks) {
         if (now - lock.at > this.opts.lockTimeoutMs) {
           room.locks.delete(groupId);
+          this.trackAbandoned(room, groupId, lock, 'timeout');
           const g = findGroup(room.state, groupId);
           if (g) this.io.to(room.slug).emit('group:unlocked', { groupId, x: g.x, y: g.y });
         }
@@ -549,6 +644,11 @@ export class RoomManager {
       await this.storage.delete(rec.imageKey).catch((err) => console.error('[rooms] image delete failed', err));
       await this.repo.deleteRoom(rec.slug);
       this.live.delete(rec.slug);
+      this.events.track(
+        'room_expired',
+        { roomSlug: rec.slug, roomType: 'private', puzzleId: `${rec.slug}:${rec.seed}` },
+        { age_ms: now - rec.createdAt.getTime(), idle_ms: now - rec.lastActivityAt.getTime() },
+      );
       deleted++;
     }
     if (deleted > 0) console.log(`[rooms] deleted ${deleted} expired private room(s)`);

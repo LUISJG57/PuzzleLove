@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
+import { PrismaEventStore } from './analytics/prismaEventStore';
+import { BufferedEventSink } from './analytics/sink';
 import { createApp } from './app';
 import { loadConfig } from './config';
 import { PrismaRepo } from './db/prismaRepo';
@@ -15,7 +17,9 @@ async function main() {
 
   const httpServer = createServer();
   const io: IoServer = new Server(httpServer, { serveClient: false, maxHttpBufferSize: 64 * 1024 });
-  const manager = new RoomManager(io, repo, storage);
+  const events = new BufferedEventSink(new PrismaEventStore(repo.prisma));
+  events.start();
+  const manager = new RoomManager(io, repo, storage, { events });
   registerSockets(io, manager);
   await manager.init();
 
@@ -32,6 +36,7 @@ async function main() {
     console.log('[server] shutting down, saving rooms...');
     io.close();
     await manager.stop();
+    await events.stop();
     await repo.prisma.$disconnect();
     process.exit(0);
   };

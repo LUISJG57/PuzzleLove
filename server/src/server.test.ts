@@ -16,6 +16,7 @@ import {
   type RoomSnapshot,
   type ServerToClientEvents,
 } from '@puzzlelove/shared';
+import { MemoryEventSink } from './analytics/sink';
 import { createApp } from './app';
 import { MemoryRepo } from './db/memoryRepo';
 import { RoomManager, type IoServer } from './rooms/RoomManager';
@@ -30,6 +31,7 @@ let storage: LocalStorage;
 let httpServer: HttpServer;
 let io: IoServer;
 let manager: RoomManager;
+let events: MemoryEventSink;
 let app: ReturnType<typeof createApp>;
 let url: string;
 const clients: Client[] = [];
@@ -76,7 +78,8 @@ beforeEach(async () => {
   storage = new LocalStorage(tmp);
   httpServer = createServer();
   io = new Server(httpServer);
-  manager = new RoomManager(io, repo, storage, { tickMs: 10, saveMs: 50, globalNextDelayMs: 100 });
+  events = new MemoryEventSink();
+  manager = new RoomManager(io, repo, storage, { tickMs: 10, saveMs: 50, globalNextDelayMs: 100, events });
   registerSockets(io, manager);
   await manager.init();
   app = createApp({
@@ -163,6 +166,7 @@ describe('HTTP', () => {
     expect(await manager.expireRooms(Date.now())).toBe(0);
     await repo.updateRoom(slug, { lastActivityAt: new Date(Date.now() - 25 * 60 * 60 * 1000) });
     expect(await manager.expireRooms(Date.now())).toBe(1);
+    expect(events.ofType('room_expired')).toMatchObject([{ roomSlug: slug, roomType: 'private' }]);
     expect(await repo.getRoom(slug)).toBeNull();
     expect(await storage.get(room.imageKey)).toBeNull();
     expect(await repo.getRoom(GLOBAL_ROOM)).not.toBeNull();
@@ -271,5 +275,82 @@ describe('multiplayer', () => {
     expect(fresh.meta.imageUrl).toBe(snap.meta.imageUrl);
     expect(fresh.state.groups).toHaveLength(25);
     expect(fresh.state.completedAt).toBeNull();
+  });
+});
+
+describe('analytics events', () => {
+  async function waitFor(check: () => boolean, timeoutMs = 2000) {
+    const start = Date.now();
+    while (!check()) {
+      if (Date.now() - start > timeoutMs) throw new Error('condition not met in time');
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+
+  it('tracks a private room from creation to completion', async () => {
+    const slug = await createRoom();
+    const [created] = events.ofType('room_created');
+    const [started] = events.ofType('puzzle_started').filter((e) => e.roomSlug === slug);
+    expect(created.payload.pieces_requested).toBe(24);
+    expect(started.payload.source).toBe('create');
+    expect(started.puzzleId).toBe(created.puzzleId);
+
+    const a = await connect();
+    const b = await connect();
+    const snap = ((await join(a, slug, 'Ana')) as { snapshot: RoomSnapshot }).snapshot;
+    await join(b, slug, 'Beto');
+    const [joined] = events.ofType('player_joined');
+    expect(joined).toMatchObject({ clientId: 'cid-Ana', roomType: 'private', puzzleId: created.puzzleId });
+    expect(joined.payload.name).toBe('Ana');
+
+    const [first, ...rest] = snap.state.groups.map((g) => g.id);
+    expect(await grab(a, first)).toBe(true);
+    expect(await grab(b, first)).toBe(false);
+    expect(events.ofType('piece_grabbed')[0].payload).toEqual({ group_id: first, group_size: 1 });
+    expect(events.ofType('grab_conflict')[0]).toMatchObject({ clientId: 'cid-Beto', payload: { group_id: first } });
+
+    a.emit('group:release', { g: first, x: 5000, y: 5000 });
+    await waitFor(() => events.ofType('piece_dropped').length === 1);
+    expect(events.ofType('piece_dropped')[0].payload).toMatchObject({ group_id: first, snapped: false, merged_groups: 0 });
+
+    const completed = next(a, 'puzzle:completed');
+    for (const id of [first, ...rest]) {
+      expect(await grab(a, id)).toBe(true);
+      a.emit('group:release', { g: id, x: 0, y: 0 });
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await completed;
+    const drops = events.ofType('piece_dropped');
+    expect(drops.filter((d) => d.payload.snapped).length).toBeGreaterThan(0);
+    expect(drops.every((d) => d.payload.hold_ms >= 0)).toBe(true);
+    const [done] = events.ofType('puzzle_completed');
+    expect(done.payload.pieces).toBe(snap.meta.rows * snap.meta.cols);
+    expect(done.payload.contributors[0]).toMatchObject({ client_id: 'cid-Ana', name: 'Ana' });
+
+    b.disconnect();
+    await waitFor(() => events.ofType('player_left').length === 1);
+    expect(events.ofType('player_left')[0]).toMatchObject({ clientId: 'cid-Beto', payload: { reason: 'disconnect' } });
+  });
+
+  it('tracks abandoned grabs, failed joins and admin rotations', async () => {
+    const a = await connect();
+    const snap = ((await join(a, GLOBAL_ROOM, 'Ana')) as { snapshot: RoomSnapshot }).snapshot;
+    const [g1, g2] = snap.state.groups.map((g) => g.id);
+    await grab(a, g1);
+    await grab(a, g2);
+    expect(events.ofType('piece_abandoned')[0].payload).toMatchObject({ group_id: g1, reason: 'regrab' });
+    a.disconnect();
+    await waitFor(() => events.ofType('piece_abandoned').length === 2);
+    expect(events.ofType('piece_abandoned')[1].payload).toMatchObject({ group_id: g2, reason: 'left' });
+
+    const c = await connect();
+    expect(await join(c, 'missing-room')).toEqual({ ok: false, error: 'not_found' });
+    expect(events.ofType('join_failed')[0].payload).toEqual({ error: 'not_found' });
+
+    const agent = request.agent(app);
+    await agent.post('/api/admin/login').send({ password: 'secret' });
+    await agent.post('/api/admin/next');
+    expect(events.ofType('global_rotated')[0].payload).toEqual({ trigger: 'admin', source: 'reshuffle' });
+    expect(events.ofType('puzzle_started').at(-1)).toMatchObject({ roomType: 'global', payload: { source: 'reshuffle' } });
   });
 });

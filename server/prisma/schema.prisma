@@ -35,3 +35,24 @@ model GlobalQueueItem {
 
   @@index([usedAt, createdAt])
 }
+
+/// Append-only gameplay events for the analytics pipeline (see src/analytics).
+/// `id` is the incremental extract watermark; `eventId` deduplicates downstream.
+model AnalyticsEvent {
+  id            BigInt   @id @default(autoincrement())
+  eventId       String   @unique @map("event_id") @db.Uuid
+  eventType     String   @map("event_type")
+  schemaVersion Int      @map("schema_version") @db.SmallInt
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(3)
+  ingestedAt    DateTime @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  sessionId     String?  @map("session_id")
+  clientId      String?  @map("client_id")
+  roomSlug      String?  @map("room_slug")
+  roomType      String?  @map("room_type")
+  puzzleId      String?  @map("puzzle_id")
+  payload       Json
+
+  @@index([occurredAt])
+  @@index([eventType, occurredAt])
+  @@map("analytics_events")
+}
