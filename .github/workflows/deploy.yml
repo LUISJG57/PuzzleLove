@@ -3,6 +3,13 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # A docs-only commit would otherwise rebuild every image with a fresh tag, which makes
+    # `compose up` recreate the game container and drop the players mid-puzzle. Nothing under
+    # these paths reaches an image (.dockerignore excludes docs/) or the server (only deploy/ is
+    # rsynced), and a commit that touches code as well still deploys. workflow_dispatch forces it.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
