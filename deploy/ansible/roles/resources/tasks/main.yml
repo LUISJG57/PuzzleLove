@@ -1,0 +1,64 @@
+---
+# Splits the host's memory and CPU between three cgroup v2 slices so that no single app can starve
+# the platform. Containers opt in with `cgroup_parent:` in docker-compose.prod.yml; the kernel, not
+# a convention between repositories, is what enforces the group ceiling. See docs/platform.md.
+- name: Install resource slices
+  ansible.builtin.template:
+    src: slice.j2
+    dest: "/etc/systemd/system/{{ item.name }}.slice"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ resource_slices }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Reload systemd
+
+# The units must be loaded before they are started, or systemd creates the slices implicitly with
+# none of the settings and only picks them up on the next reload. Handlers otherwise run at the end
+# of the play, which leaves that window open.
+- name: Apply the new slice units
+  ansible.builtin.meta: flush_handlers
+
+# Starting them here, rather than waiting for the first container, makes the settings visible to
+# `systemctl show` right after provisioning, which is what the runbook tells you to check.
+# resources_enabled exists for the container-based test target, like swap_enabled.
+- name: Enable resource slices
+  ansible.builtin.systemd_service:
+    name: "{{ item.name }}.slice"
+    state: started
+  loop: "{{ resource_slices }}"
+  loop_control:
+    label: "{{ item.name }}"
+  # In check mode the unit file has not been written yet, so starting it would fail for a reason
+  # that says nothing about the real run.
+  when:
+    - resources_enabled | default(true)
+    - not ansible_check_mode
+
+- name: Create directories for the other apps
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop: "{{ app_dirs_extra }}"
+
+# Shared by every app on the host, so it outlives any single compose project and every compose file
+# declares it `external: true`. Plain docker commands (like the swap role) to avoid adding the
+# Python Docker SDK to the server just for this.
+- name: Configure the shared edge network
+  when: resources_enabled | default(true)
+  block:
+    - name: Check the shared edge network
+      ansible.builtin.command: docker network inspect {{ edge_network }}
+      register: resources_edge_network_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Create the shared edge network
+      ansible.builtin.command: docker network create {{ edge_network }}
+      when: resources_edge_network_state.rc != 0
+      changed_when: true

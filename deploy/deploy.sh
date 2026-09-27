@@ -55,7 +55,8 @@ health_check() {
   # Staging certificates (and the local self-signed one) are not trusted.
   if [[ -z "$ACME_CA_SERVER" || "$ACME_CA_SERVER" == *staging* || -n "${COMPOSE_EXTRA:-}" ]]; then insecure=(-k); fi
   for _ in $(seq 1 10); do
-    if curl -fsS "${insecure[@]}" --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" >/dev/null; then
+    # The game lives under /puzzlelove now; the domain root is the portfolio, deployed separately.
+    if curl -fsS "${insecure[@]}" --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/puzzlelove/api/health" >/dev/null; then
       return 0
     fi
     sleep 3
@@ -68,7 +69,13 @@ release() {
   export APP_IMAGE="${r}puzzlelove:$t" MIGRATE_IMAGE="${r}puzzlelove-migrate:$t" \
     BACKUP_IMAGE="${r}puzzlelove-backup:$t" PIPELINE_IMAGE="${r}puzzlelove-pipeline:$t"     SUPERSET_IMAGE="${r}puzzlelove-superset:$t"
   echo "==> deploying $APP_IMAGE"
-  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup pipeline superset-init; fi
+  # The local rehearsal has nothing to pull, so it must build from the working tree: without this
+  # it silently brings up whatever stale :local images happen to exist.
+  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then
+    compose pull app migrate backup pipeline superset-init
+  else
+    compose build
+  fi
   compose up -d --wait --wait-timeout 120 garage && bash garage/init-lake.sh
   compose up -d --remove-orphans --wait --wait-timeout 180 && health_check
 }

@@ -18,7 +18,7 @@ const ADMIN_COOKIE = 'pl_admin';
 const ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface AppDeps {
-  config: Pick<Config, 'adminPassword' | 'sessionSecret' | 'trustProxy' | 'clientDist'>;
+  config: Pick<Config, 'adminPassword' | 'sessionSecret' | 'trustProxy' | 'basePath' | 'clientDist'>;
   manager: RoomManager;
   storage: ImageStorage;
   repo: Repo;
@@ -132,12 +132,14 @@ export function createApp({ config, manager, storage, repo, warehouse, roomCreat
       sameSite: 'lax',
       secure: req.secure,
       maxAge: ADMIN_SESSION_MS,
+      // Scoped to the game so the cookie is never sent to the portfolio at the domain root.
+      path: config.basePath,
     });
     res.json({ ok: true });
   });
 
   app.post('/api/admin/logout', (_req, res) => {
-    res.clearCookie(ADMIN_COOKIE);
+    res.clearCookie(ADMIN_COOKIE, { path: config.basePath });
     res.json({ ok: true });
   });
 

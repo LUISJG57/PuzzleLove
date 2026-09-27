@@ -18,6 +18,10 @@ services:
       NETWORKS: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    cgroup_parent: platform.slice
+    mem_reservation: 32m
+    cpu_shares: 256
+    oom_score_adj: -800
     networks: [socket]
     deploy:
       resources:
@@ -36,7 +40,7 @@ services:
       - --accesslog.format=json
       - --providers.docker.endpoint=tcp://socket-proxy:2375
       - --providers.docker.exposedByDefault=false
-      - --providers.docker.network=puzzlelove_proxy
+      - --providers.docker.network=edge
       - --providers.file.directory=/etc/traefik/dynamic
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
@@ -55,6 +59,10 @@ services:
       - ./traefik/dynamic:/etc/traefik/dynamic:ro
       - ./traefik/users:/etc/traefik/users:ro
       - letsencrypt:/letsencrypt
+    cgroup_parent: platform.slice
+    mem_reservation: 64m
+    cpu_shares: 1024
+    oom_score_adj: -800
     networks: [proxy, socket]
     healthcheck:
       test: ['CMD', 'traefik', 'healthcheck', '--ping']
@@ -80,6 +88,10 @@ services:
       POSTGRES_DB: puzzlelove
     volumes:
       - pgdata:/var/lib/postgresql/data
+    cgroup_parent: platform.slice
+    mem_reservation: 512m
+    cpu_shares: 1024
+    oom_score_adj: -800
     networks: [internal]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U puzzlelove -d puzzlelove']
@@ -106,6 +118,10 @@ services:
       - ./garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
+    cgroup_parent: platform.slice
+    mem_reservation: 128m
+    cpu_shares: 512
+    oom_score_adj: -500
     networks: [internal]
     healthcheck:
       test: ['CMD', '/garage', 'status']
@@ -123,6 +139,9 @@ services:
       DATABASE_URL: postgresql://puzzlelove:${POSTGRES_PASSWORD}@postgres:5432/puzzlelove
     depends_on:
       postgres: { condition: service_healthy }
+    cgroup_parent: apps.slice
+    cpu_shares: 512
+    oom_score_adj: -500
     networks: [internal]
 
   app:
@@ -144,14 +163,34 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
       TRUST_PROXY: 1
+      # Must match `base` in client/vite.config.ts; scopes the admin cookie (see docs/platform.md).
+      BASE_PATH: /puzzlelove
+    cgroup_parent: apps.slice
+    mem_reservation: 300m
+    cpu_shares: 1024
+    oom_score_adj: -500
     networks: [proxy, internal]
     # The server saves every room on SIGTERM before exiting.
     stop_grace_period: 30s
     labels:
       traefik.enable: 'true'
-      traefik.http.routers.app.rule: Host(`${DOMAIN}`)
+      # StripPrefix keeps every Express route and the Socket.IO path at the root, so the
+      # container healthcheck and the bots (which connect to http://app:3001) need no prefix.
+      traefik.http.routers.app.rule: Host(`${DOMAIN}`) && PathPrefix(`/puzzlelove`)
       traefik.http.routers.app.entrypoints: websecure
-      traefik.http.routers.app.middlewares: ratelimit@file
+      traefik.http.routers.app.middlewares: ratelimit@file,app-slash@docker,app-strip@docker
+      traefik.http.middlewares.app-strip.stripprefix.prefixes: /puzzlelove
+      # Without the trailing slash StripPrefix would leave an empty path, so redirect first.
+      traefik.http.middlewares.app-slash.redirectregex.regex: ^(https?://[^/]+)/puzzlelove$$
+      traefik.http.middlewares.app-slash.redirectregex.replacement: $${1}/puzzlelove/
+      # Room links shared before the move still work.
+      traefik.http.routers.app-legacy.rule: >-
+        Host(`${DOMAIN}`) && (PathPrefix(`/r/`) || Path(`/new`) || Path(`/admin`))
+      traefik.http.routers.app-legacy.entrypoints: websecure
+      traefik.http.routers.app-legacy.middlewares: app-legacy@docker
+      traefik.http.routers.app-legacy.service: app
+      traefik.http.middlewares.app-legacy.redirectregex.regex: ^(https?://[^/]+)/(.*)$$
+      traefik.http.middlewares.app-legacy.redirectregex.replacement: $${1}/puzzlelove/$${2}
       traefik.http.services.app.loadbalancer.server.port: 3001
     deploy:
       resources:
@@ -169,7 +208,13 @@ services:
       BOTS_MAX: ${BOTS_MAX:-2}
     healthcheck:
       disable: true
-    networks: [proxy]
+    cgroup_parent: apps.slice
+    mem_reservation: 48m
+    cpu_shares: 256
+    oom_score_adj: 500
+    # `internal`, not the shared `edge` network: the bots only need to reach app:3001, and edge is
+    # now shared with every other app on the host.
+    networks: [internal]
     stop_grace_period: 5s
     deploy:
       resources:
@@ -192,16 +237,24 @@ services:
       LAKE_ACCESS_KEY_ID: ${LAKE_ACCESS_KEY_ID:-}
       LAKE_SECRET_ACCESS_KEY: ${LAKE_SECRET_ACCESS_KEY:-}
       SPARK_DRIVER_MEMORY: 2g
+    cgroup_parent: batch.slice
+    mem_reservation: 512m
+    cpu_shares: 128
+    oom_score_adj: 800
     networks: [internal]
     deploy:
       resources:
-        limits: { memory: 3G }
+        limits: { memory: 3G, cpus: '2.0' }
 
   redis:
     image: redis:8.8-alpine
     restart: unless-stopped
     # Cache only: no persistence, bounded memory.
     command: ['redis-server', '--maxmemory', '96mb', '--maxmemory-policy', 'allkeys-lru', '--save', '', '--appendonly', 'no']
+    cgroup_parent: platform.slice
+    mem_reservation: 64m
+    cpu_shares: 256
+    oom_score_adj: -500
     networks: [internal]
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
@@ -231,6 +284,9 @@ services:
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?set SUPERSET_ADMIN_PASSWORD}
       SUPERSET_ADMIN_EMAIL: ${ACME_EMAIL}
       REDIS_URL: redis://redis:6379
+    cgroup_parent: platform.slice
+    cpu_shares: 256
+    oom_score_adj: 0
     networks: [internal]
 
   # Apache Superset at superset.$DOMAIN: public read-only dashboard, everything else behind the admin login.
@@ -243,6 +299,10 @@ services:
       <<: *superset-env
       SERVER_WORKER_AMOUNT: 2
       SERVER_THREADS_AMOUNT: 8
+    cgroup_parent: platform.slice
+    mem_reservation: 512m
+    cpu_shares: 512
+    oom_score_adj: 0
     networks: [proxy, internal]
     labels:
       traefik.enable: 'true'
@@ -269,6 +329,12 @@ services:
       AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
       RETENTION_DAYS: 30
       BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      RESOURCES_PING_URL: ${RESOURCES_PING_URL:-}
+      # MiB of declared container limits each slice may hold. Keep in sync with resource_slices in
+      # deploy/ansible/group_vars/vps.yml: apps is its MemoryHigh (apps should never need throttling),
+      # batch is its MemoryMax (the pipeline is meant to run at its ceiling), platform has no kernel
+      # ceiling so its number is a growth tripwire.
+      SLICE_BUDGETS: platform=3600,apps=2500,batch=3072
       R2_BUCKET: ${R2_BUCKET:-}
       R2_ENDPOINT: ${R2_ENDPOINT:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
@@ -289,7 +355,11 @@ services:
       RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
       RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
     # internal reaches postgres/garage; egress reaches R2.
-    networks: [internal, egress]
+    cgroup_parent: platform.slice
+    mem_reservation: 64m
+    cpu_shares: 256
+    oom_score_adj: 0
+    networks: [internal, egress, socket]
     deploy:
       resources:
         limits: { memory: 256M }
@@ -305,6 +375,10 @@ services:
       - uptime-kuma:/app/data
     # proxy: Traefik and outbound checks/Discord; internal: TCP checks of postgres/garage and backup pings;
     # socket: container status through the read-only socket proxy.
+    cgroup_parent: platform.slice
+    mem_reservation: 64m
+    cpu_shares: 256
+    oom_score_adj: 0
     networks: [proxy, internal, socket]
     labels:
       traefik.enable: 'true'
@@ -325,7 +399,10 @@ services:
         limits: { memory: 256M }
 
 networks:
+  # Shared with every other app on the host; created once (see deploy/ansible/roles/resources).
   proxy:
+    name: edge
+    external: true
   socket:
     internal: true
   internal:

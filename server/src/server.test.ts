@@ -18,6 +18,7 @@ import {
 } from '@puzzlelove/shared';
 import { MemoryEventSink } from './analytics/sink';
 import { createApp } from './app';
+import { loadConfig } from './config';
 import { MemoryRepo } from './db/memoryRepo';
 import { RoomManager, type IoServer } from './rooms/RoomManager';
 import { registerSockets } from './sockets';
@@ -83,7 +84,13 @@ beforeEach(async () => {
   registerSockets(io, manager);
   await manager.init();
   app = createApp({
-    config: { adminPassword: 'secret', sessionSecret: 'test', trustProxy: false, clientDist: path.join(tmp, 'none') },
+    config: {
+      adminPassword: 'secret',
+      sessionSecret: 'test',
+      trustProxy: false,
+      basePath: '/',
+      clientDist: path.join(tmp, 'none'),
+    },
     manager,
     storage,
     repo,
@@ -158,6 +165,40 @@ describe('HTTP', () => {
     expect(after!.imageKey).not.toBe(before);
     expect(after!.imageWidth).toBe(1000);
     expect((await agent.get('/api/admin/status')).body.queue).toHaveLength(0);
+  });
+
+  it('rejects a base path that is not absolute, instead of mis-scoping the cookie silently', () => {
+    const previous = process.env.BASE_PATH;
+    process.env.BASE_PATH = 'C:/Program Files/Git/puzzlelove'; // what Git Bash on Windows produces
+    try {
+      expect(() => loadConfig()).toThrow(/BASE_PATH/);
+    } finally {
+      if (previous === undefined) delete process.env.BASE_PATH;
+      else process.env.BASE_PATH = previous;
+    }
+  });
+
+  // The portfolio owns the domain root, so the admin cookie must not be sent to it. Traefik strips
+  // the prefix before Express sees the request, so only the cookie's scope carries it.
+  it('scopes the admin cookie to the base path, and clears it with the same path', async () => {
+    const scoped = createApp({
+      config: {
+        adminPassword: 'secret',
+        sessionSecret: 'test',
+        trustProxy: false,
+        basePath: '/puzzlelove',
+        clientDist: path.join(tmp, 'none'),
+      },
+      manager,
+      storage,
+      repo,
+    });
+    const login = await request(scoped).post('/api/admin/login').send({ password: 'secret' });
+    expect(login.status).toBe(200);
+    expect(String(login.headers['set-cookie'])).toContain('Path=/puzzlelove');
+    // A mismatched path on logout would leave the cookie in place instead of deleting it.
+    const logout = await request(scoped).post('/api/admin/logout');
+    expect(String(logout.headers['set-cookie'])).toContain('Path=/puzzlelove');
   });
 
   it('serves analytics only to admins and reports a missing warehouse', async () => {

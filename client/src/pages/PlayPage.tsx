@@ -32,6 +32,7 @@ import { NameDialog } from '../components/NameDialog';
 import { VictoryOverlay, formatDuration } from '../components/VictoryOverlay';
 import { BoardEngine } from '../game/BoardEngine';
 import { loadPlayer, readBool, safeSet, type LocalPlayer } from '../lib/player';
+import { apiUrl, homeUrl, socketPath } from '../lib/urls';
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -133,7 +134,7 @@ function Game({ room, player, onEditName }: GameProps) {
 
   // Socket lifecycle.
   useEffect(() => {
-    const socket: ClientSocket = io({ transports: ['websocket', 'polling'] });
+    const socket: ClientSocket = io({ path: socketPath, transports: ['websocket', 'polling'] });
     socketRef.current = socket;
     const players = playersRef.current;
     const colorOf = (id: string) => players.get(id)?.color ?? '#94a3b8';
@@ -162,7 +163,7 @@ function Game({ room, player, onEditName }: GameProps) {
       setShowVictory(false);
 
       const img = new Image();
-      img.src = snap.meta.imageUrl;
+      img.src = apiUrl(snap.meta.imageUrl);
       try {
         await img.decode();
       } catch {
@@ -299,7 +300,7 @@ function Game({ room, player, onEditName }: GameProps) {
           </div>
           <p>{message}</p>
           <div className="row gap">
-            <a className="btn primary" href="/">
+            <a className="btn primary" href={homeUrl}>
               {t('play.goGlobal')}
             </a>
             <Link className="btn" to="/new">
@@ -320,7 +321,7 @@ function Game({ room, player, onEditName }: GameProps) {
 
       <header className="hud hud-top">
         <div className="pill brand-pill">
-          <a href="/" className="brand">
+          <a href={homeUrl} className="brand">
             <span aria-hidden="true">🧩</span>
             <span className="brand-name">PuzzleLove</span>
           </a>
@@ -416,7 +417,7 @@ function Game({ room, player, onEditName }: GameProps) {
 
       {showReference && meta && (
         <button type="button" className="card reference" onClick={() => setShowReference(false)} aria-label={t('common.close')}>
-          <img src={meta.imageUrl} alt={t('play.reference')} />
+          <img src={apiUrl(meta.imageUrl)} alt={t('play.reference')} />
         </button>
       )}
 

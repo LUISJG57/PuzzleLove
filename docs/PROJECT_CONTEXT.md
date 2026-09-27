@@ -145,14 +145,15 @@ Objetivo: cubrir pipeline de datos, dashboard e infraestructura en el VPS.
 - **Backups fuera del VPS en Cloudflare R2** (plan gratis, compatible con S3). El usuario no tiene Azure personal.
 
 ### Presupuesto de memoria del VPS
-| Servicio | RAM |
-|---|---|
-| App Node | 300 MB |
-| Postgres | 1 GB |
-| Garage | 256 MB |
-| Superset y Redis | 1.5 GB |
-| Spark (solo mientras corre) | 2.5 GB |
-| Traefik, monitoreo y sistema | 1.3 GB |
+Repartido en tres slices de cgroup v2 que el kernel hace cumplir, para que ninguna app acapare el host aunque su
+propio repo declare límites de más (ver `docs/platform.md` y ADR-0014). Presupuestos en
+`deploy/ansible/group_vars/vps.yml`.
+
+| Slice | Contiene | Presupuesto |
+|---|---|---|
+| `platform` | Traefik, socket-proxy, Postgres, Garage, Redis, Superset, Uptime Kuma, backups | `MemoryMin=2G`, `CPUWeight=400` |
+| `apps` | el juego (400 MB), los bots (128 MB), el portfolio (64 MB) y toda app futura | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=200` |
+| `batch` | el pipeline de PySpark (3 GB, solo de madrugada) | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=50`, `IOWeight=50` |
 
 ### Trabajo del agente, en orden
 1. **Tracking de eventos: HECHO (2026-09-17).** Módulo `server/src/analytics/`:
@@ -249,7 +250,9 @@ o se presentan como conocimiento, no como experiencia.
 
 ## 9. VPS y despliegue (en curso)
 
-VPS de Hostinger: Ubuntu 24.04, 8 GB, dominio `luisjgl.cloud` (DNS en Hostinger; registros A `@`, `traefik`, `minio`, `superset`).
+VPS de Hostinger: Ubuntu 24.04, 8 GB, dominio `luisjgl.cloud` (DNS en Hostinger; registros A `@`, `traefik`, `minio`, `superset`, `status`).
+La raíz del dominio es el portfolio (repo aparte, `/opt/portfolio`); el juego vive en `/puzzlelove/`. Una subruta
+nueva no necesita DNS nuevo. Contrato para añadir apps: `docs/platform.md`.
 
 **Hecho en el VPS (manual, guiado):** usuario `luis` con sudo y llave SSH; `00-hardening.conf` (sin root, sin contraseñas,
 `AllowUsers luis`); UFW (22 limit, 80, 443) + firewall de hPanel; fail2ban (sshd); unattended-upgrades; swap 4 GB;

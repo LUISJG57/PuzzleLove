@@ -1,0 +1,11 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+# Managed by Ansible (deploy/ansible/roles/resources). Do not edit on the server.
+# {{ item.comment }}
+[Unit]
+Description={{ item.description }}
+Before=slices.target
+
+[Slice]
+{% for key, value in item.settings.items() %}
+{{ key }}={{ value }}
+{% endfor %}

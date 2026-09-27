@@ -41,12 +41,12 @@ All services run under Docker Compose (`deploy/docker-compose.prod.yml`). Only T
 flowchart LR
   internet((Internet)) -->|":80/:443"| traefik
 
-  subgraph proxy [network: proxy]
+  subgraph proxy [network: edge · shared with every app on the host]
     traefik[Traefik v3.7]
     app[app<br/>Node game server]
-    bots[bots<br/>simulator]
     kuma[uptime-kuma]
     superset[superset]
+    portfolio[portfolio<br/>separate repo]
   end
 
   subgraph socket [network: socket · internal]
@@ -54,6 +54,7 @@ flowchart LR
   end
 
   subgraph internal [network: internal · no egress]
+    bots[bots<br/>simulator]
     postgres[(postgres 17)]
     garage[(garage S3)]
     redis[(redis cache)]
@@ -63,7 +64,7 @@ flowchart LR
     backup[backup<br/>cron]
   end
 
-  traefik --> app & kuma & superset
+  traefik --> app & kuma & superset & portfolio
   traefik --> sockproxy
   kuma --> sockproxy
   bots --> app
@@ -92,16 +93,40 @@ flowchart LR
 | uptime-kuma | `louislam/uptime-kuma:2.5.5-slim-rootless` | Internal monitoring and public status page | 256 MB |
 | backup | `puzzlelove-backup` | Daily `pg_dump` + image archive, age-encrypted, to R2 | 256 MB |
 
-Steady-state memory is roughly 1.5 GB; the pipeline adds up to ~2.5 GB for a few minutes at night.
+Steady-state memory is roughly 1.5 GB; the pipeline adds up to ~2.5 GB for a few minutes at night. The portfolio,
+which is deployed from its own repository, adds ~5 MB behind a 64 MB cap.
 
-### Hostnames
+Those per-container limits are ceilings only, so they are grouped into three cgroup v2 slices that the kernel
+enforces — see [ADR-0014](adr/0014-resource-tiers.md) and [platform.md](platform.md):
 
-| Host | Target | Access |
+| Slice | Holds | Budget |
 |---|---|---|
-| `luisjgl.cloud` | app | Public; `/admin` behind a password (signed, `Secure` cookie) |
+| `platform.slice` | Traefik, socket proxy, Postgres, Garage, Redis, Superset, Uptime Kuma, backups | `MemoryMin=2G`, `CPUWeight=400` |
+| `apps.slice` | the game, the bots, the portfolio, every future app | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=200` |
+| `batch.slice` | the PySpark pipeline | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=50`, `IOWeight=50` |
+
+The shared ceiling on `apps.slice` is what keeps a future app from starving the platform, whatever limits its own
+repository declares. `deploy/backup/resources.sh` checks the declared limits against these budgets daily and alerts
+through Uptime Kuma when they no longer fit.
+
+### Routes
+
+The apex root belongs to the portfolio, deployed from its own repository into the same Traefik
+([ADR-0013](adr/0013-portfolio-at-root.md)). The game is one app among several; [platform.md](platform.md) is the
+contract for adding the next one.
+
+| URL | Target | Access |
+|---|---|---|
+| `luisjgl.cloud/` | portfolio | Public; static export behind nginx |
+| `luisjgl.cloud/puzzlelove/` | app | Public; `/admin` behind a password (signed, `Secure` cookie scoped to the prefix) |
+| `luisjgl.cloud/r/…`, `/new`, `/admin` | app | 301 into `/puzzlelove/…`, so links shared before the move still work |
 | `superset.luisjgl.cloud` | superset | Public dashboard; everything else behind Superset login |
 | `status.luisjgl.cloud` | uptime-kuma | Public status page; admin UI behind Traefik basic auth **and** Kuma login |
 | `traefik.luisjgl.cloud` | Traefik dashboard | Basic auth |
+
+Traefik matches ``Host(`${DOMAIN}`) && PathPrefix(`/puzzlelove`)`` and **strips the prefix** before the request
+reaches the container, so every Express route and the Socket.IO path stay at the root: the container healthcheck and
+the bots, which connect to `http://app:3001`, are untouched by the move. Only the browser sees the prefix.
 
 ## 3. The game server
 
@@ -267,6 +292,8 @@ sequenceDiagram
 |---|---|
 | Host | SSH keys only, no root login, `AllowUsers luis`, `MaxAuthTries 3`; fail2ban; unattended security upgrades; all managed by Ansible |
 | Network | Hostinger panel firewall + UFW (22 rate-limited, 80, 443). Docker bypasses UFW, so **no container except Traefik publishes ports**, and databases sit on an `internal` network with no egress |
+| Multi-app isolation | Only the containers Traefik must reach join the shared `edge` network; everything else, including the bots, stays on `internal`. Other apps on `edge` can therefore reach `app:3001` but nothing behind it |
+| Resource isolation | Three cgroup v2 slices enforced by the kernel, so no app can starve the platform whatever its own repository declares ([ADR-0014](adr/0014-resource-tiers.md)) |
 | Edge | Let's Encrypt certificates, HTTP→HTTPS redirect, HSTS, `nosniff`, `X-Frame-Options: DENY`, referrer and permissions policies, TLS ≥ 1.2, per-IP rate limit |
 | Docker API | Traefik and Uptime Kuma reach Docker only through a read-only socket proxy (writes return 403) |
 | Secrets | Only in `/opt/puzzlelove/.env` (mode 600) and GitHub environment secrets. Deploy uses a dedicated SSH key and a pinned `known_hosts`. rsync excludes `.env` |

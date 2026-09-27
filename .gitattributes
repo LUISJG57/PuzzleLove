@@ -1,2 +1,6 @@
 * text=auto
 *.sh text eol=lf
+# Linux containers execute or parse these straight from the checkout, so never CRLF.
+crontab text eol=lf
+*.j2 text eol=lf
+*.conf text eol=lf

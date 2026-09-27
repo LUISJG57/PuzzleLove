@@ -4,8 +4,9 @@ import { CreatePage } from './pages/CreatePage';
 import { PlayPage } from './pages/PlayPage';
 
 export function App() {
+  // basename keeps every <Link> and <Navigate> inside the game's path prefix.
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Routes>
         <Route path="/" element={<PlayPage />} />
         <Route path="/r/:slug" element={<PlayPage />} />

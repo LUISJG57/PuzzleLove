@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BarList, Heatmap, LineChart } from '../components/charts';
+import { apiUrl } from '../lib/urls';
 
 type Traffic = 'all' | 'human' | 'bot' | 'synthetic';
 
@@ -49,7 +50,7 @@ export function AnalyticsPanel() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/admin/analytics?days=${days}&traffic=${traffic}`)
+    fetch(apiUrl(`/api/admin/analytics?days=${days}&traffic=${traffic}`))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((json: Analytics) => {
         if (cancelled) return;
