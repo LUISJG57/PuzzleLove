@@ -2,6 +2,10 @@
 
 VPS Ubuntu 24.04 en Hostinger · dominio `luisjgl.cloud` · stack en `/opt/puzzlelove` (copiado desde `deploy/` por el pipeline).
 
+El juego vive en `https://luisjgl.cloud/puzzlelove/`; la raíz del dominio es el portfolio, que se despliega desde su
+propio repo a `/opt/portfolio` y se cuelga de la red Docker compartida `edge`. Para añadir otra app, ver
+[platform.md](platform.md).
+
 ## Arquitectura
 
 ```
@@ -9,8 +13,9 @@ Internet ──► firewall hPanel ──► UFW (22, 80, 443)
                                    │
                          Traefik :80/:443  (Let's Encrypt, headers, rate limit)
                             │            └── socket-proxy ──► docker.sock (solo lectura)
-                  red proxy │
-                           app (Node + Socket.IO)
+                  red edge  │ (compartida con las demás apps del host)
+                            ├── portfolio (nginx)          →  /
+                           app (Node + Socket.IO)          →  /puzzlelove/
                  red internal │
                   ┌───────────┴───────────┐
                Postgres 17            Garage (S3)
@@ -19,6 +24,10 @@ Internet ──► firewall hPanel ──► UFW (22, 80, 443)
 ```
 
 Solo Traefik publica puertos. Docker se salta UFW, así que ningún otro servicio debe usar `ports:`.
+
+Los contenedores se reparten en tres slices de cgroup (`platform`, `apps`, `batch`) que el kernel hace cumplir, así
+que ninguna app puede acaparar el host. Presupuestos en `deploy/ansible/group_vars/vps.yml`, detalle en
+[platform.md](platform.md).
 
 ## Deploy
 
@@ -70,6 +79,7 @@ También se puede relanzar un deploy anterior desde GitHub → Actions → Deplo
 | `swap` | 4 GB de swap y `vm.swappiness=10` |
 | `docker` | Docker CE + Compose, `daemon.json` con rotación de logs y `live-restore` |
 | `app` | `/opt/puzzlelove` y un aviso si faltan `.env` o `traefik/users` |
+| `resources` | los tres slices de cgroup (`platform`, `apps`, `batch`), la red compartida `edge` y `/opt/<app>` de las demás apps |
 
 Corre desde Windows con Docker, sin instalar Ansible. Pide la contraseña de sudo de `luis`:
 ```powershell
@@ -108,10 +118,10 @@ sudo apt install -y rsync
    | `VPS_SSH_KEY` | llave privada ed25519 creada solo para Actions (su `.pub` va en `~luis/.ssh/authorized_keys`) |
    | `VPS_KNOWN_HOSTS` | salida de `ssh-keyscan -t ed25519 <IP>` |
 
-4. Después del primer deploy, en GitHub → Packages, marca `puzzlelove` y `puzzlelove-migrate` como **públicos**. Así el VPS descarga las imágenes sin tener que hacer login.
+4. Después del primer deploy, en GitHub → Packages, marca `puzzlelove` y `puzzlelove-migrate` como **públicos**. Así el VPS descarga las imágenes sin tener que hacer login. Lo mismo aplica a la imagen de cada app nueva (`portfolio`, …).
 
 ### Pasar de Let's Encrypt staging a producción
-Cuando `https://luisjgl.cloud` ya responde con el certificado de staging (no confiable):
+Cuando `https://luisjgl.cloud/puzzlelove/` ya responde con el certificado de staging (no confiable):
 ```bash
 sed -i 's#^ACME_CA_SERVER=.*#ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory#' .env
 dc stop traefik && dc rm -f traefik && docker volume rm puzzlelove_letsencrypt
@@ -195,14 +205,38 @@ Las alertas llegan a **Discord** por webhook, que se configura en Kuma → Setti
 | Monitor | Tipo | Destino | Qué detecta |
 |---|---|---|---|
 | App (interno) | HTTP | `http://app:3001/api/health` | la app no responde |
-| Sitio público | HTTP | `https://luisjgl.cloud/api/health` (avisa si el certificado vence pronto) | Traefik, TLS o certificado |
+| Juego público | HTTP | `https://luisjgl.cloud/puzzlelove/api/health` (avisa si el certificado vence pronto) | Traefik, TLS o certificado |
+| Portfolio público | HTTP | `https://luisjgl.cloud/healthz` | el portfolio no responde |
 | Postgres | TCP | `postgres:5432` | base de datos caída |
 | Garage | TCP | `garage:3900` | almacenamiento caído |
 | Contenedores | Docker | host `tcp://socket-proxy:2375` | contenedor detenido o reiniciándose |
 | Backup diario | Push | intervalo de 25 h; URL en `BACKUP_PING_URL` | el backup no corrió o falló |
+| Recursos | Push | intervalo de 25 h; URL en `RESOURCES_PING_URL` | un slice quedó sobre-asignado, o el disco pasó de 85 % |
 
 Como Kuma corre en el mismo VPS, no puede avisar si se cae la máquina entera. Para eso existe un monitor externo en
-**UptimeRobot** (plan gratis) sobre `https://luisjgl.cloud/api/health`, que también alerta a Discord.
+**UptimeRobot** (plan gratis) sobre `https://luisjgl.cloud/puzzlelove/api/health`, que también alerta a Discord.
+
+### Recursos
+
+Los contenedores viven en tres slices de cgroup v2 que el kernel hace cumplir, así que ninguna app puede acaparar el
+host aunque su propio repo declare límites de más. Los presupuestos están en `resource_slices`
+(`deploy/ansible/group_vars/vps.yml`) y se aplican con `ansible-playbook site.yml`. Detalle y contrato para apps
+nuevas: [platform.md](platform.md).
+
+```bash
+systemd-cgls                                              # qué contenedor está en qué slice
+systemctl show apps.slice -p MemoryHigh -p MemoryMax -p CPUWeight
+cat /sys/fs/cgroup/apps.slice/memory.current              # uso real del grupo
+docker stats --no-stream                                  # uso real por contenedor
+dc exec backup resources.sh                               # el guard, a mano
+```
+
+El guard corre solo todos los días a las **06:00** y solo hace ping a Kuma si todo cabe: si un slice queda
+sobre-asignado, si aparece un contenedor sin `cgroup_parent` (que se escaparía del techo del grupo) o si el disco
+pasa de 85 %, no hace ping y Kuma avisa a Discord.
+
+Si `SLICE_BUDGETS` (en `docker-compose.prod.yml`) y `resource_slices` se desincronizan, el guard miente: son dos
+sitios a propósito, y cada uno tiene un comentario apuntando al otro.
 
 ## Bots y datos sintéticos
 

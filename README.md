@@ -4,7 +4,11 @@
 [![Deploy](https://github.com/LUISJG57/PuzzleLove/actions/workflows/deploy.yml/badge.svg)](https://github.com/LUISJG57/PuzzleLove/actions/workflows/deploy.yml)
 
 A real-time multiplayer jigsaw puzzle, plus the production platform and data stack around it — all running on a
-single 8 GB VPS.
+single 8 GB VPS, alongside my portfolio at the domain root.
+
+> The VPS is shared: `luisjgl.cloud` serves the portfolio (its own repository), and this project lives at
+> `/puzzlelove/`. This repository owns the shared infrastructure — Traefik, Postgres, Garage, Superset, monitoring,
+> backups and the cgroup resource tiers. [docs/platform.md](docs/platform.md) is the contract for adding another app.
 
 Upload a photo, it is cut into classic tabbed pieces, and everyone in the room assembles it together on a shared board
 with live cursors, piece locking and snapping sounds.
@@ -13,7 +17,8 @@ with live cursors, piece locking and snapping sounds.
 
 | What | Link | Access |
 |---|---|---|
-| The game | https://luisjgl.cloud | Public |
+| The game | https://luisjgl.cloud/puzzlelove/ | Public |
+| Portfolio (root of the same VPS) | https://luisjgl.cloud | Public |
 | Analytics dashboard (Apache Superset) | https://superset.luisjgl.cloud/superset/dashboard/puzzlelove/ | Public, read-only |
 | Service status (Uptime Kuma) | https://status.luisjgl.cloud/status/puzzlelove | Public |
 | CI/CD runs | https://github.com/LUISJG57/PuzzleLove/actions | Public |
@@ -21,7 +26,7 @@ with live cursors, piece locking and snapping sounds.
 
 ## Verify it in 5 minutes
 
-1. **Multiplayer:** open https://luisjgl.cloud in two browser windows (or phone + laptop) with different names. Drag a
+1. **Multiplayer:** open https://luisjgl.cloud/puzzlelove/ in two browser windows (or phone + laptop) with different names. Drag a
    piece in one: the other shows your cursor, locks the piece while you hold it and plays the snap when it connects.
    Bots named "🤖 …" join the global room during active hours.
 2. **Private room:** click *Create my room*, upload any photo, pick a size and share the link.
@@ -56,6 +61,7 @@ with live cursors, piece locking and snapping sounds.
 | Simulator on the real engine | [`tools/simulator/src/generate.ts`](tools/simulator/src/generate.ts), [`live.ts`](tools/simulator/src/live.ts) |
 | CI/CD with rollback | [`.github/workflows/`](.github/workflows/), [`deploy/deploy.sh`](deploy/deploy.sh) |
 | Infrastructure as code | [`deploy/docker-compose.prod.yml`](deploy/docker-compose.prod.yml), [`deploy/ansible/`](deploy/ansible/) |
+| Multi-app host with enforced resource tiers | [`deploy/ansible/roles/resources/`](deploy/ansible/roles/resources/), [`deploy/backup/resources.sh`](deploy/backup/resources.sh), [`docs/platform.md`](docs/platform.md) |
 | Encrypted backups and restore drill | [`deploy/backup/backup.sh`](deploy/backup/backup.sh), [`deploy/restore.sh`](deploy/restore.sh) |
 
 ## What is private, and why
@@ -87,7 +93,8 @@ request.
 ```mermaid
 flowchart LR
   players([Players]) -->|HTTPS / WebSocket| traefik[Traefik]
-  traefik --> app[Game server<br/>Node + Socket.IO]
+  traefik -->|/| portfolio[Portfolio<br/>separate repo]
+  traefik -->|/puzzlelove/| app[Game server<br/>Node + Socket.IO]
   app --> pg[(Postgres<br/>game state + events)]
   app --> garage[(Garage S3<br/>images)]
   pg -->|daily 04:30| pipeline[PySpark + Delta Lake<br/>bronze → silver → gold]
@@ -108,6 +115,7 @@ flowchart LR
 | [docs/adr/](docs/adr/) | Architecture decision records: why each major choice was made and what it costs |
 | [docs/journey.md](docs/journey.md) | How the platform was built step by step, every incident and bug found along the way, and lessons learned |
 | [docs/runbook.md](docs/runbook.md) | Day-2 operations: deploy, rollback, backups and restores, pipeline, Superset, Ansible |
+| [docs/platform.md](docs/platform.md) | The shared VPS: routing, resource tiers, and the checklist for adding another app |
 
 ## Repository layout
 
@@ -117,7 +125,8 @@ server/            Express 5 + Socket.IO game server, Prisma schema and migratio
 client/            React 19 + Vite + Konva board, i18n (es/en), admin + analytics dashboard
 tools/simulator/   Live bots and a synthetic-history generator built on the real engine
 analytics/         PySpark + Delta Lake pipeline, data quality checks, warehouse loader (Python, uv, pytest)
-deploy/            Compose stack, Traefik, Garage, backups, Superset, deploy/restore scripts, Ansible
+deploy/            Compose stack, Traefik, Garage, backups, Superset, deploy/restore scripts, Ansible,
+                   the cgroup resource tiers shared with every other app on the host
 .github/workflows/ CI (tests, PySpark tests, ansible-lint) and CD (images + deploy)
 ```
 
@@ -133,7 +142,9 @@ npm run db:embedded                     # terminal 1: embedded Postgres on port 
 npm run db:migrate && npm run dev       # terminal 2: client on http://localhost:5173, server on 3001
 ```
 
-The full production stack on Docker Desktop (Traefik, Garage, pipeline, Superset, backups) at `https://puzzlelove.localhost`:
+The full production stack on Docker Desktop (Traefik, Garage, pipeline, Superset, backups) at
+`https://puzzlelove.localhost/puzzlelove/` — the domain root 404s locally, because the portfolio is deployed from its
+own repository:
 
 ```bash
 cp deploy/.env.example deploy/.env      # fill the secrets

@@ -17,3 +17,5 @@ we accepted. All decisions were made in September 2026 for a single 8 GB VPS ope
 | [0010](0010-bots-and-synthetic-data.md) | Live bots and synthetic history, always labeled |
 | [0011](0011-superset-dashboards-as-code.md) | Superset with a public, aggregate-only dashboard defined as code |
 | [0012](0012-ansible-after-manual-hardening.md) | Harden by hand first, then codify with Ansible |
+| [0013](0013-portfolio-at-root.md) | The portfolio owns the domain root; the game moves to a subpath |
+| [0014](0014-resource-tiers.md) | Resource tiers as cgroup slices, not per-container limits alone |
