@@ -3,6 +3,13 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # A docs-only commit would otherwise rebuild every image with a fresh tag, which makes
+    # `compose up` recreate the game container and drop the players mid-puzzle. Nothing under
+    # these paths reaches an image (.dockerignore excludes docs/) or the server (only deploy/ is
+    # rsynced), and a commit that touches code as well still deploys. workflow_dispatch forces it.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -133,7 +140,9 @@ jobs:
         env:
           TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
         run: |
-          rsync -az --chmod=D755,F644 -e "ssh -i ~/.ssh/id_deploy" \
+          # Only directories are normalised. F644 used to strip the execute bit from deploy.sh,
+          # restore.sh and garage/init-lake.sh, so the documented `./deploy.sh` failed on the server.
+          rsync -az --chmod=D755 -e "ssh -i ~/.ssh/id_deploy" \
             --exclude .env --exclude .env.example --exclude traefik/users \
             --exclude docker-compose.local.yml --exclude .deployed-images --exclude ansible \
             deploy/ "$TARGET:/opt/puzzlelove/"
