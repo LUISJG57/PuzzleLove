@@ -69,7 +69,13 @@ release() {
   export APP_IMAGE="${r}puzzlelove:$t" MIGRATE_IMAGE="${r}puzzlelove-migrate:$t" \
     BACKUP_IMAGE="${r}puzzlelove-backup:$t" PIPELINE_IMAGE="${r}puzzlelove-pipeline:$t"     SUPERSET_IMAGE="${r}puzzlelove-superset:$t"
   echo "==> deploying $APP_IMAGE"
-  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then compose pull app migrate backup pipeline superset-init; fi
+  # The local rehearsal has nothing to pull, so it must build from the working tree: without this
+  # it silently brings up whatever stale :local images happen to exist.
+  if [[ -z "${COMPOSE_EXTRA:-}" ]]; then
+    compose pull app migrate backup pipeline superset-init
+  else
+    compose build
+  fi
   compose up -d --wait --wait-timeout 120 garage && bash garage/init-lake.sh
   compose up -d --remove-orphans --wait --wait-timeout 180 && health_check
 }
