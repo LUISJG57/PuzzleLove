@@ -11,7 +11,7 @@ services:
       - --accesslog.format=json
       - --providers.docker.endpoint=tcp://socket-proxy:2375
       - --providers.docker.exposedByDefault=false
-      - --providers.docker.network=puzzlelove_proxy
+      - --providers.docker.network=edge
       - --providers.file.directory=/etc/traefik/dynamic
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure

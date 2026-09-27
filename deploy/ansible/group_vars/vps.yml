@@ -17,3 +17,38 @@ swap_swappiness: 10
 firewall_allowed_tcp_ports: [80, 443]
 
 app_dir: /opt/puzzlelove
+
+# Every app on the host shares one Docker network so Traefik can route to all of them, and one
+# directory per app under /opt. Adding an app means one more entry here, not a change to any
+# existing repository. See docs/platform.md.
+edge_network: edge
+app_dirs_extra:
+  - /opt/portfolio
+
+# Resource tiers. The kernel enforces these ceilings, so an app that declares too much for itself
+# still cannot crowd out Postgres or Traefik. Budgets intentionally over-commit the 8 GB: MemoryHigh
+# throttles rather than kills, and batch runs at 04:30 when apps.slice is nearly idle.
+resource_slices:
+  - name: platform
+    description: Shared infrastructure (Traefik, Postgres, Garage, Redis, Superset, monitoring, backups)
+    comment: Never squeezed; everything else depends on it.
+    settings:
+      MemoryMin: 2G
+      CPUWeight: 400
+      IOWeight: 200
+  - name: apps
+    description: User-facing apps (the game, the portfolio, and whatever comes next)
+    comment: One shared ceiling for all apps, so app N+1 cannot starve the platform.
+    settings:
+      MemoryHigh: 2500M
+      MemoryMax: 3G
+      CPUWeight: 200
+      IOWeight: 100
+  - name: batch
+    description: Nightly batch work (the PySpark pipeline)
+    comment: First to give up memory, CPU and disk when anything else needs them.
+    settings:
+      MemoryHigh: 2500M
+      MemoryMax: 3G
+      CPUWeight: 50
+      IOWeight: 50

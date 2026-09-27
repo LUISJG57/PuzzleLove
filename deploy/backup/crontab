@@ -1,2 +1,4 @@
 # Daily at 03:30 America/Mexico_City (TZ is set in the image).
 30 3 * * * /usr/local/bin/backup.sh run
+# Resource guard, daily at 06:00: alerts through Uptime Kuma when a slice is over-allocated.
+0 6 * * * /usr/local/bin/resources.sh
