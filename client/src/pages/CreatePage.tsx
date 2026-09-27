@@ -5,6 +5,7 @@ import { DEFAULT_PIECE_COUNT, PIECE_COUNT_OPTIONS, gridForPieceCount } from '@pu
 import { IconImage } from '../components/Icons';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { prepareImage, readError, type PreparedImage } from '../lib/upload';
+import { apiUrl } from '../lib/urls';
 
 const KNOWN_ERRORS = ['invalid_image', 'image_too_small', 'file_too_large', 'rate_limited'];
 
@@ -47,7 +48,7 @@ export function CreatePage() {
       const form = new FormData();
       form.append('pieces', String(pieces));
       form.append('image', image.blob, 'image.jpg');
-      const res = await fetch('/api/rooms', { method: 'POST', body: form });
+      const res = await fetch(apiUrl('/api/rooms'), { method: 'POST', body: form });
       if (!res.ok) {
         setError(await readError(res));
         return;

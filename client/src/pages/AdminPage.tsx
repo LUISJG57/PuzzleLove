@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { IconX } from '../components/Icons';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { prepareImage, readError } from '../lib/upload';
+import { apiUrl } from '../lib/urls';
 import { AnalyticsPanel } from './AnalyticsPanel';
 
 interface QueueEntry {
@@ -29,7 +30,7 @@ export function AdminPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
-    const res = await fetch('/api/admin/status');
+    const res = await fetch(apiUrl('/api/admin/status'));
     setStatus((await res.json()) as AdminStatus);
   }, []);
 
@@ -46,7 +47,7 @@ export function AdminPage() {
   const login = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    const res = await fetch('/api/admin/login', {
+    const res = await fetch(apiUrl('/api/admin/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password }),
@@ -61,7 +62,7 @@ export function AdminPage() {
   };
 
   const logout = async () => {
-    await fetch('/api/admin/logout', { method: 'POST' });
+    await fetch(apiUrl('/api/admin/logout'), { method: 'POST' });
     await refresh();
   };
 
@@ -73,7 +74,7 @@ export function AdminPage() {
       const prepared = await prepareImage(file);
       const form = new FormData();
       form.append('image', prepared.blob, 'image.jpg');
-      const res = await fetch('/api/admin/queue', { method: 'POST', body: form });
+      const res = await fetch(apiUrl('/api/admin/queue'), { method: 'POST', body: form });
       if (!res.ok) setError(t(`create.errors.${await readError(res)}`, { defaultValue: t('create.errors.generic') }));
       await refresh();
     } finally {
@@ -82,14 +83,14 @@ export function AdminPage() {
   };
 
   const remove = async (id: string) => {
-    await fetch(`/api/admin/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await fetch(apiUrl(`/api/admin/queue/${encodeURIComponent(id)}`), { method: 'DELETE' });
     await refresh();
   };
 
   const next = async () => {
     setBusy(true);
     try {
-      await fetch('/api/admin/next', { method: 'POST' });
+      await fetch(apiUrl('/api/admin/next'), { method: 'POST' });
       await refresh();
     } finally {
       setBusy(false);
@@ -149,7 +150,7 @@ export function AdminPage() {
             <section className="admin-section">
               <div className="field-label">{t('admin.current')}</div>
               <div className="current-global">
-                <img src={status.global.imageUrl} alt="" />
+                <img src={apiUrl(status.global.imageUrl)} alt="" />
                 <div>
                   <span className={`badge ${status.global.completed ? 'done' : ''}`}>
                     {status.global.completed ? t('admin.completed') : t('admin.inProgress')}
@@ -194,7 +195,7 @@ export function AdminPage() {
                 <ol className="queue">
                   {status.queue.map((q, i) => (
                     <li key={q.id}>
-                      <img src={q.imageUrl} alt="" />
+                      <img src={apiUrl(q.imageUrl)} alt="" />
                       <span className="queue-pos">{i + 1}</span>
                       <button className="icon-btn danger" type="button" onClick={() => remove(q.id)} aria-label={t('common.delete')}>
                         <IconX />

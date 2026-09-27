@@ -163,6 +163,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
       TRUST_PROXY: 1
+      # Must match `base` in client/vite.config.ts; scopes the admin cookie (see docs/platform.md).
+      BASE_PATH: /puzzlelove
     cgroup_parent: apps.slice
     mem_reservation: 300m
     cpu_shares: 1024
@@ -172,9 +174,23 @@ services:
     stop_grace_period: 30s
     labels:
       traefik.enable: 'true'
-      traefik.http.routers.app.rule: Host(`${DOMAIN}`)
+      # StripPrefix keeps every Express route and the Socket.IO path at the root, so the
+      # container healthcheck and the bots (which connect to http://app:3001) need no prefix.
+      traefik.http.routers.app.rule: Host(`${DOMAIN}`) && PathPrefix(`/puzzlelove`)
       traefik.http.routers.app.entrypoints: websecure
-      traefik.http.routers.app.middlewares: ratelimit@file
+      traefik.http.routers.app.middlewares: ratelimit@file,app-slash@docker,app-strip@docker
+      traefik.http.middlewares.app-strip.stripprefix.prefixes: /puzzlelove
+      # Without the trailing slash StripPrefix would leave an empty path, so redirect first.
+      traefik.http.middlewares.app-slash.redirectregex.regex: ^(https?://[^/]+)/puzzlelove$$
+      traefik.http.middlewares.app-slash.redirectregex.replacement: $${1}/puzzlelove/
+      # Room links shared before the move still work.
+      traefik.http.routers.app-legacy.rule: >-
+        Host(`${DOMAIN}`) && (PathPrefix(`/r/`) || Path(`/new`) || Path(`/admin`))
+      traefik.http.routers.app-legacy.entrypoints: websecure
+      traefik.http.routers.app-legacy.middlewares: app-legacy@docker
+      traefik.http.routers.app-legacy.service: app
+      traefik.http.middlewares.app-legacy.redirectregex.regex: ^(https?://[^/]+)/(.*)$$
+      traefik.http.middlewares.app-legacy.redirectregex.replacement: $${1}/puzzlelove/$${2}
       traefik.http.services.app.loadbalancer.server.port: 3001
     deploy:
       resources:
