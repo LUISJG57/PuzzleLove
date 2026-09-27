@@ -133,7 +133,9 @@ jobs:
         env:
           TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
         run: |
-          rsync -az --chmod=D755,F644 -e "ssh -i ~/.ssh/id_deploy" \
+          # Only directories are normalised. F644 used to strip the execute bit from deploy.sh,
+          # restore.sh and garage/init-lake.sh, so the documented `./deploy.sh` failed on the server.
+          rsync -az --chmod=D755 -e "ssh -i ~/.ssh/id_deploy" \
             --exclude .env --exclude .env.example --exclude traefik/users \
             --exclude docker-compose.local.yml --exclude .deployed-images --exclude ansible \
             deploy/ "$TARGET:/opt/puzzlelove/"
