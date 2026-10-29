@@ -24,6 +24,7 @@ app_dir: /opt/puzzlelove
 edge_network: edge
 app_dirs_extra:
   - /opt/portfolio
+  - /opt/muda
 
 # Resource tiers. The kernel enforces these ceilings, so an app that declares too much for itself
 # still cannot crowd out Postgres or Traefik. Budgets intentionally over-commit the 8 GB: MemoryHigh
