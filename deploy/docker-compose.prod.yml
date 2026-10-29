@@ -386,17 +386,18 @@ services:
       traefik.http.routers.status.rule: Host(`status.${DOMAIN}`)
       traefik.http.routers.status.entrypoints: websecure
       traefik.http.routers.status.middlewares: dashboard-auth@file
-      # Public status pages and the assets they need.
+      # Public status pages and the assets they need, plus push monitors for apps that are not on `edge`
+      # (e.g. mUda's worker); the token in a push URL is its credential.
       traefik.http.routers.status-public.rule: >-
         Host(`status.${DOMAIN}`) && (PathPrefix(`/status/`) || PathPrefix(`/api/status-page/`) ||
-        PathPrefix(`/assets/`) || PathPrefix(`/upload/`) || Path(`/icon.svg`) || Path(`/favicon.ico`) ||
-        Path(`/manifest.json`))
+        PathPrefix(`/api/push/`) || PathPrefix(`/assets/`) || PathPrefix(`/upload/`) || Path(`/icon.svg`) ||
+        Path(`/favicon.ico`) || Path(`/manifest.json`))
       traefik.http.routers.status-public.entrypoints: websecure
       traefik.http.routers.status-public.middlewares: ratelimit@file
       traefik.http.services.status.loadbalancer.server.port: 3001
     deploy:
       resources:
-        limits: { memory: 256M }
+        limits: { memory: 384M }
 
 networks:
   # Shared with every other app on the host; created once (see deploy/ansible/roles/resources).

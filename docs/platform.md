@@ -21,6 +21,7 @@ Decisions behind it: [ADR-0013](adr/0013-portfolio-at-root.md) (routing and per-
 |---|---|---|
 | `luisjgl.cloud/` | portfolio | Static Next.js export behind nginx; router `priority: 1` so longer rules win |
 | `luisjgl.cloud/puzzlelove/` | game | `PathPrefix` + `StripPrefix`; `/r/…`, `/new`, `/admin` 301 into the prefix |
+| `muda.luisjgl.cloud` | mUda ([repo](https://github.com/LUISJG57/mUda), private) | `PathPrefix(/api)` goes to its api, unstripped; the rest to its nginx web |
 | `superset.luisjgl.cloud` | Superset | Public dashboard only; everything else behind its login |
 | `status.luisjgl.cloud` | Uptime Kuma | Public status page; admin behind Traefik basic auth **and** Kuma's login |
 | `traefik.luisjgl.cloud` | Traefik dashboard | Basic auth |
@@ -57,6 +58,9 @@ Traefik then issues the certificate by itself, because TLS is configured on the 
 5. **Ask for a directory and a budget:** add `/opt/<app>` to `app_dirs_extra` and your memory to the table, both
    in `deploy/ansible/group_vars/vps.yml`, and re-run the playbook.
 6. **Make the GHCR package public** after the first push, or the VPS cannot pull it without logging in.
+7. **Monitor it** in Uptime Kuma: an HTTP monitor on your health URL. Scheduled jobs ping a push monitor; a
+   container that is not on `edge` reaches it at `https://status.$DOMAIN/api/push/<token>`, which is public
+   (the token is the credential).
 
 ## Resource tiers
 
@@ -79,7 +83,8 @@ Postgres or Traefik. Your per-container keys only decide who gives ground first 
 | `apps.slice` | **your app** | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=200` |
 | `batch.slice` | nightly batch work | `MemoryHigh=2500M`, `MemoryMax=3G`, `CPUWeight=50`, `IOWeight=50` |
 
-Current `apps.slice` allocation: the game 400M, the bots 128M, the portfolio 64M — 592M of 2500M.
+Current `apps.slice` allocation: the game 400M, the bots 128M, the portfolio 64M, mUda 608M (web 32M, api 192M,
+worker 192M and its own Postgres 192M) — 1200M of 2500M.
 
 Two traps worth repeating:
 
