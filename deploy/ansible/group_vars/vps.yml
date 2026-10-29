@@ -7,7 +7,7 @@ deploy_user: luis
 # Public keys allowed to log in as deploy_user. Public keys are safe to commit.
 deploy_authorized_keys:
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFskEqI1MPo/oBp6hJRnvfhUtamo79n1JXgD4uwjHzOK cheta@Luis"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKZ6GFsff5NYasiPWVQctlC9U1pJyvYZs3xar2+kkOh+ github-actions"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFqIpDlhx7hZC8RiOtUDnIkMq2Qity51ekYLT1OyDYxo github-actions"
 
 ssh_max_auth_tries: 3
 
